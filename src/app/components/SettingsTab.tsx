@@ -52,8 +52,8 @@ function ScrollWheel({ items, value, onChange }: {
   return (
     <div className="relative rounded-2xl overflow-hidden bg-slate-50 border border-slate-200" style={{ width: 80, height: ITEM_H * 3 }}>
       {/* Highlight for selected row (middle row) */}
-      <div className="absolute left-0 right-0 bg-orange-100 border-y-2 border-orange-300 z-10 pointer-events-none"
-        style={{ top: ITEM_H, height: ITEM_H }} />
+      <div className="absolute left-0 right-0 bg-orange-50 bg-opacity-50 border-y-2 border-orange-200 pointer-events-none"
+        style={{ top: ITEM_H, height: ITEM_H, zIndex: 0 }} />
       {/* Fades */}
       <div className="absolute top-0 left-0 right-0 z-20 pointer-events-none" style={{ height: ITEM_H, background: 'linear-gradient(to bottom, rgb(248,250,252), transparent)' }} />
       <div className="absolute bottom-0 left-0 right-0 z-20 pointer-events-none" style={{ height: ITEM_H, background: 'linear-gradient(to top, rgb(248,250,252), transparent)' }} />
@@ -216,7 +216,10 @@ function RatioSliders({ settings, onUpdateSettings }: {
             <input
               type="range" min={0} max={100} value={pct}
               onChange={e => handleChange(key, parseInt(e.target.value))}
-              className={`w-full h-2.5 rounded-full appearance-none bg-slate-100 disabled:opacity-40 disabled:cursor-default cursor-pointer ${accentClass}`}
+              className={`w-full h-2.5 rounded-full appearance-none disabled:opacity-40 disabled:cursor-default cursor-pointer ${accentClass}`}
+              style={{
+                background: `linear-gradient(to right, var(--tailwind-${key}-color, ${key === 'needsRatio' ? '#f97316' : key === 'savingsRatio' ? '#10b981' : '#8b5cf6'}) ${pct}%, #f1f5f9 ${pct}%)`
+              }}
             />
           </div>
         );
@@ -234,6 +237,8 @@ function RatioSliders({ settings, onUpdateSettings }: {
 // ── Main Component ────────────────────────────────────────────────────────────
 export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions, onUpdateSettings }) => {
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [isEditingPayday, setIsEditingPayday] = useState(false);
+  const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
 
   const handleExport = () => {
     const headers = ['Date', 'Time', 'Category', 'Amount', 'Split By', 'Effective Amount', 'Is Fixed Bill', 'Description'];
@@ -321,7 +326,9 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
             {(settings.savingsGoals?.length ?? 0) < 3 && (
               <button
                 onClick={() => {
-                  const newGoal = { id: Date.now().toString(), name: '', amount: 0, targetDate: null, savedSoFar: 0 };
+                  const newId = Date.now().toString();
+                  setEditingGoalId(newId);
+                  const newGoal = { id: newId, name: '', amount: 0, targetDate: null, savedSoFar: 0 };
                   onUpdateSettings({ savingsGoals: [...(settings.savingsGoals ?? []), newGoal] });
                 }}
                 className="text-xs font-bold text-orange-500 bg-orange-50 px-3 py-1 rounded-full"
@@ -330,7 +337,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
               </button>
             )}
           </div>
-          <div className="px-5 py-4 space-y-6">
+          <div className="px-5 py-4 space-y-4">
             {(settings.savingsGoals?.length ?? 0) === 0 && (
               <p className="text-xs text-slate-400 text-center py-2">
                 No goals yet. Tap "+ Add Goal" to save for something you love! 🎯
@@ -349,12 +356,48 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
                   goalSummary = `~${months} months at $${savingsMonthly.toFixed(0)}/mo`;
                 }
               }
+
+              const isEditing = editingGoalId === goal.id;
+
+              if (!isEditing) {
+                return (
+                  <div key={goal.id} className="flex items-center justify-between bg-white border border-slate-100 rounded-2xl p-4 shadow-sm">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-orange-50 flex items-center justify-center text-orange-500">
+                        <Target className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <p className="font-bold text-slate-800 text-sm">{goal.name || 'Unnamed Goal'}</p>
+                        <p className="text-xs font-medium text-slate-500 uppercase tracking-wide mt-0.5">
+                          ${goal.amount.toLocaleString()} {goalDate ? `• ${format(goalDate, 'MMM yyyy')}` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={() => setEditingGoalId(goal.id)} className="text-xs font-semibold text-slate-400 hover:text-orange-500 px-2 py-1">
+                      Edit
+                    </button>
+                  </div>
+                );
+              }
+
               return (
-                <div key={goal.id} className="border border-slate-100 rounded-2xl p-4 space-y-3 relative">
-                  <button
-                    onClick={() => onUpdateSettings({ savingsGoals: (settings.savingsGoals ?? []).filter((_, i) => i !== gi) })}
-                    className="absolute top-3 right-3 text-slate-300 hover:text-red-400 transition-colors text-lg leading-none"
-                  >×</button>
+                <div key={goal.id} className="border border-orange-200 bg-orange-50/30 rounded-2xl p-4 space-y-4 relative">
+                  <div className="flex justify-between items-center mb-1">
+                    <h3 className="text-xs font-bold text-orange-600 uppercase tracking-wider">Editing Goal</h3>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          onUpdateSettings({ savingsGoals: (settings.savingsGoals ?? []).filter((_, i) => i !== gi) });
+                          setEditingGoalId(null);
+                        }}
+                        className="text-xs font-semibold text-slate-400 hover:text-red-500 bg-white px-2 py-1 rounded-lg border border-slate-100"
+                      >Remove</button>
+                      <button
+                        onClick={() => setEditingGoalId(null)}
+                        className="text-xs font-bold text-white bg-orange-500 px-3 py-1 rounded-lg shadow-sm"
+                      >Save</button>
+                    </div>
+                  </div>
                   <div>
                     <label className="text-xs font-medium text-slate-500 block mb-1.5">Goal Name</label>
                     <input type="text" placeholder="e.g. Japan Trip, New MacBook..."
@@ -364,7 +407,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
                         updated[gi] = { ...updated[gi], name: e.target.value };
                         onUpdateSettings({ savingsGoals: updated });
                       }}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 outline-none focus:border-orange-400" />
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 outline-none focus:border-orange-400 shadow-sm" />
                   </div>
                   <div>
                     <label className="text-xs font-medium text-slate-500 block mb-1.5">Goal Amount ($)</label>
@@ -375,20 +418,22 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
                         updated[gi] = { ...updated[gi], amount: parseFloat(e.target.value) || 0 };
                         onUpdateSettings({ savingsGoals: updated });
                       }}
-                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 outline-none focus:border-orange-400" />
+                      className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 outline-none focus:border-orange-400 shadow-sm" />
                   </div>
-                  <GoalDatePicker
-                    value={goal.targetDate}
-                    onChange={v => {
-                      const updated = [...(settings.savingsGoals ?? [])];
-                      updated[gi] = { ...updated[gi], targetDate: v };
-                      onUpdateSettings({ savingsGoals: updated });
-                    }}
-                  />
+                  <div className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
+                    <GoalDatePicker
+                      value={goal.targetDate}
+                      onChange={v => {
+                        const updated = [...(settings.savingsGoals ?? [])];
+                        updated[gi] = { ...updated[gi], targetDate: v };
+                        onUpdateSettings({ savingsGoals: updated });
+                      }}
+                    />
+                  </div>
                   {goalSummary && (
-                    <div className="bg-orange-50 rounded-xl p-3 flex items-start gap-2">
+                    <div className="bg-white rounded-xl p-3 flex items-start gap-2 border border-slate-100">
                       <Target className="w-4 h-4 text-orange-500 flex-shrink-0 mt-0.5" />
-                      <p className="text-xs text-orange-700 leading-relaxed">{goalSummary}</p>
+                      <p className="text-xs text-slate-600 leading-relaxed font-medium">{goalSummary}</p>
                     </div>
                   )}
                 </div>
@@ -400,27 +445,44 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
 
         {/* Payday */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-          <div className="px-5 pt-4 pb-3 border-b border-slate-50">
+          <div className="px-5 pt-4 pb-3 border-b border-slate-50 flex justify-between items-center">
             <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Payday & Celebrations</h2>
+            {isEditingPayday ? (
+              <button onClick={() => setIsEditingPayday(false)} className="text-xs font-bold text-orange-500 bg-orange-50 px-3 py-1 rounded-full">Save</button>
+            ) : (
+              <button onClick={() => setIsEditingPayday(true)} className="text-xs font-semibold text-slate-400 hover:text-slate-600">Edit</button>
+            )}
           </div>
           <div className="px-5 py-5">
-            <p className="text-xs font-medium text-slate-500 mb-4">
-              Drag to select your payday date — we'll celebrate your savings then!
-            </p>
-            <div className="flex items-center gap-5">
-              <ScrollWheel
-                items={Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: `${i + 1}` }))}
-                value={settings.paydayDay || 1}
-                onChange={v => onUpdateSettings({ paydayDay: v as number })}
-              />
-              <div>
-                <p className="text-sm text-slate-500">Your payday is the</p>
-                <p className="text-3xl font-black text-orange-500 leading-tight mt-0.5">
-                  {ordinal(settings.paydayDay || 1)}
+            {isEditingPayday ? (
+              <>
+                <p className="text-xs font-medium text-slate-500 mb-4">
+                  Drag to select your payday date — we'll celebrate your savings then!
                 </p>
-                <p className="text-xs text-slate-400">of every month</p>
+                <div className="flex items-center gap-5">
+                  <ScrollWheel
+                    items={Array.from({ length: 31 }, (_, i) => ({ value: i + 1, label: `${i + 1}` }))}
+                    value={settings.paydayDay || 1}
+                    onChange={v => onUpdateSettings({ paydayDay: v as number })}
+                  />
+                  <div>
+                    <p className="text-sm text-slate-500">Your payday is the</p>
+                    <p className="text-3xl font-black text-orange-500 leading-tight mt-0.5">
+                      {ordinal(settings.paydayDay || 1)}
+                    </p>
+                    <p className="text-xs text-slate-400">of every month</p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex justify-between items-center bg-orange-50 p-4 rounded-2xl border border-orange-100">
+                <div>
+                  <p className="text-sm font-semibold text-orange-800">Your payday is the {ordinal(settings.paydayDay || 1)}</p>
+                  <p className="text-xs text-orange-600/80">of every month</p>
+                </div>
+                <div className="text-3xl">🎉</div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 

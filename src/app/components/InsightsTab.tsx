@@ -345,16 +345,22 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
               </h3>
               <div className="relative">
                 <ResponsiveContainer width="100%" height={250}>
-                  <PieChart>
+                  <PieChart style={{ outline: 'none' }}>
                     <Pie data={chartData} cx="50%" cy="50%"
                       innerRadius={68} outerRadius={98}
                       paddingAngle={3} dataKey="value"
+                      style={{ outline: 'none' }}
+                      onClick={(_: any, index: number) => {
+                        // Toggle active state, but don't open bottom sheet
+                        setActiveSlice(activeSlice === index ? null : index);
+                      }}
                       activeIndex={activeSlice !== null ? activeSlice : undefined}
                       activeShape={renderActiveShape}
                       animationBegin={0} animationDuration={800}>
                       {chartData.map((_, index) => (
                         <Cell key={`cell-${index}`}
                           fill={PALETTE[index % PALETTE.length]}
+                          style={{ outline: 'none' }}
                           opacity={activeSlice !== null && activeSlice !== index ? 0.4 : 1} />
                       ))}
                     </Pie>
