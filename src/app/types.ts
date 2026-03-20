@@ -8,15 +8,27 @@ export interface Transaction {
   isFixed?: boolean; // If true, subtracts from monthly pool only (not daily limit)
 }
 
+export interface SavingsGoal {
+  id: string;
+  name: string;
+  amount: number;
+  targetDate: string | null; // ISO date string (YYYY-MM-DD) or null
+  savedSoFar: number; // manually tracked or computed
+}
+
 export interface UserSettings {
   income: number;
   isSavingsAutomated: boolean;
   isOnboarded: boolean;
   streakCount: number;
   lastLogDate: string | null;
+  trackingStartDate: string | null; // ISO date when the user first completed onboarding
+  // Legacy single-goal fields (kept for backward-compat, but UI uses savingsGoals[])
   savingsGoalName: string;
   savingsGoalAmount: number;
-  savingsGoalDate: string | null; // target date to reach goal
+  savingsGoalDate: string | null;
+  // Multi-goal array (up to 3)
+  savingsGoals: SavingsGoal[];
   paydayDay: number;
   // Customizable ratios (must sum to 1.0)
   needsRatio: number;       // default 0.70

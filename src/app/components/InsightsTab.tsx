@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Sector } from 'recharts';
-import { Coffee, Utensils, Zap, Car, Bus, Home, ShoppingBag, Info, Target, TrendingUp, Gift } from 'lucide-react';
+import { Coffee, Utensils, Zap, Car, Bus, Home, ShoppingBag, Info, Target, TrendingUp, Gift, X, ChevronRight } from 'lucide-react';
 import { Transaction, UserSettings } from '../types';
 import { format, startOfMonth, endOfMonth, isWithinInterval, addMonths, differenceInMonths, parseISO } from 'date-fns';
 
@@ -18,6 +18,10 @@ const PALETTE = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4
 const CATEGORY_ICONS: Record<string, React.ElementType> = {
   Food: Utensils, Coffee, Utility: Zap, Transport: Bus,
   Ride: Car, Shopping: ShoppingBag, Rent: Home, Other: Info,
+};
+const CATEGORY_EMOJIS: Record<string, string> = {
+  Food: '🍱', Coffee: '☕', Utility: '⚡', Transport: '🚌',
+  Ride: '🚗', Shopping: '🛍️', Rent: '🏠', Other: '📦',
 };
 
 const renderActiveShape = (props: any) => {
@@ -41,72 +45,90 @@ function getAvailableMonths(transactions: Transaction[]): Date[] {
   return months.sort((a, b) => b.getTime() - a.getTime());
 }
 
-// ── Savings Goal Progress Card ────────────────────────────────────────────────
+// ── Savings Goal Progress Card (multi-goal aware) ─────────────────────────────
 function GoalProgressCard({ settings }: { settings: UserSettings }) {
-  const goalAmount = settings.savingsGoalAmount || 0;
-  const goalName = settings.savingsGoalName || '';
-  const totalSaved = settings.totalSaved || 0;
+  // Prefer the new multi-goal array; fall back to legacy single-goal fields
+  const goals = settings.savingsGoals?.length
+    ? settings.savingsGoals
+    : settings.savingsGoalAmount
+      ? [{ id: 'legacy', name: settings.savingsGoalName || 'My Goal', amount: settings.savingsGoalAmount, targetDate: settings.savingsGoalDate, savedSoFar: settings.totalSaved || 0 }]
+      : [];
+
   const weeklyRollover = settings.weeklyRollover || 0;
   const savingsMonthly = settings.income * settings.savingsRatio;
-  const goalDate = settings.savingsGoalDate ? parseISO(settings.savingsGoalDate) : null;
+  const hasGoals = goals.length > 0;
 
-  const hasGoal = goalAmount > 0;
-  const progressPct = hasGoal ? Math.min(100, (totalSaved / goalAmount) * 100) : 0;
+  const [activeGoalIdx, setActiveGoalIdx] = useState(0);
+  const goal = goals[activeGoalIdx] ?? null;
+
+  const totalSaved = goal?.savedSoFar ?? settings.totalSaved ?? 0;
+  const goalAmount = goal?.amount ?? 0;
+  const goalDate = goal?.targetDate ? parseISO(goal.targetDate) : null;
+  const progressPct = goalAmount > 0 ? Math.min(100, (totalSaved / goalAmount) * 100) : 0;
 
   let etaLine = '';
-  if (hasGoal && savingsMonthly > 0) {
+  if (hasGoals && savingsMonthly > 0 && goal) {
     if (goalDate) {
       const monthsLeft = Math.max(1, differenceInMonths(goalDate, new Date()));
       const needed = goalAmount / monthsLeft;
       etaLine = `Need $${needed.toFixed(0)}/mo to hit ${format(goalDate, 'MMM yyyy')}`;
     } else {
       const monthsNeeded = Math.ceil(Math.max(0, goalAmount - totalSaved) / savingsMonthly);
-      if (monthsNeeded <= 0) {
-        etaLine = "🎉 Goal reached!";
-      } else {
-        etaLine = `~${monthsNeeded} more months at $${savingsMonthly.toFixed(0)}/mo`;
-      }
+      etaLine = monthsNeeded <= 0 ? '🎉 Goal reached!' : `~${monthsNeeded} more months at $${savingsMonthly.toFixed(0)}/mo`;
     }
   }
 
   return (
     <div className="bg-white rounded-3xl border border-slate-100 shadow-sm overflow-hidden">
-      {/* Top accent bar */}
       <div className="h-1 bg-gradient-to-r from-orange-400 via-pink-400 to-violet-400" />
-
       <div className="px-5 py-5">
         {/* Header */}
         <div className="flex items-start justify-between mb-4">
           <div>
             <div className="flex items-center gap-1.5 mb-0.5">
-              {hasGoal ? <Target className="w-4 h-4 text-orange-500" /> : <Gift className="w-4 h-4 text-emerald-500" />}
+              {hasGoals ? <Target className="w-4 h-4 text-orange-500" /> : <Gift className="w-4 h-4 text-emerald-500" />}
               <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                {hasGoal ? 'Savings Goal' : 'Savings Stash'}
+                {hasGoals ? 'Savings Goal' : 'Savings Stash'}
               </span>
             </div>
             <p className="font-black text-slate-800 text-lg leading-tight">
-              {hasGoal ? (goalName || 'My Goal') : 'Extra Saved This Week!'}
+              {hasGoals ? (goal?.name || 'My Goal') : 'Extra Saved This Week!'}
             </p>
           </div>
-          {hasGoal && goalDate && (
+          {goal && goalDate && (
             <span className="text-[11px] font-bold text-orange-500 bg-orange-50 px-2 py-1 rounded-full">
               {format(goalDate, 'MMM yyyy')}
             </span>
           )}
         </div>
 
-        {/* Saved amount row */}
+        {/* Multi-goal tab pills */}
+        {goals.length > 1 && (
+          <div className="flex gap-2 mb-4 overflow-x-auto">
+            {goals.map((g, i) => (
+              <button key={g.id}
+                onClick={() => setActiveGoalIdx(i)}
+                className={`flex-shrink-0 text-xs font-semibold px-3 py-1 rounded-full transition-all ${
+                  i === activeGoalIdx ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500'
+                }`}>
+                {g.name}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Amount row */}
         <div className="flex items-baseline gap-2 mb-3">
           <span className="text-3xl font-black text-slate-800 tabular-nums">
-            ${(hasGoal ? totalSaved : weeklyRollover).toFixed(2)}
+            ${(hasGoals ? totalSaved : weeklyRollover).toFixed(2)}
           </span>
-          {hasGoal && (
+          {hasGoals && goalAmount > 0 && (
             <span className="text-sm text-slate-400 font-medium">of ${goalAmount.toLocaleString()}</span>
           )}
         </div>
 
         {/* Progress bar */}
-        {hasGoal && (
+        {hasGoals && goalAmount > 0 && (
           <div className="mb-3">
             <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
               <motion.div
@@ -133,25 +155,94 @@ function GoalProgressCard({ settings }: { settings: UserSettings }) {
             >
               <TrendingUp className="w-4 h-4 text-emerald-500 flex-shrink-0" />
               <div>
-                <p className="text-xs font-bold text-emerald-700">
-                  +${weeklyRollover.toFixed(2)} rolled in this week! 🐶
-                </p>
+                <p className="text-xs font-bold text-emerald-700">+${weeklyRollover.toFixed(2)} rolled in this week! 🐶</p>
                 <p className="text-[10px] text-emerald-600">
-                  {hasGoal
-                    ? 'Daily savings stacked toward your goal'
-                    : 'You spent under budget — these are yours to keep!'}
+                  {hasGoals ? 'Daily savings stacked toward your goal' : 'You spent under budget — these are yours to keep!'}
                 </p>
               </div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* ETA line */}
-        {etaLine && (
-          <p className="text-xs text-slate-400 mt-3">{etaLine}</p>
-        )}
+        {etaLine && <p className="text-xs text-slate-400 mt-3">{etaLine}</p>}
       </div>
     </div>
+  );
+}
+
+// ── Category Bottom Sheet ─────────────────────────────────────────────────────
+interface BottomSheetProps {
+  category: string;
+  color: string;
+  total: number;
+  pct: string;
+  transactions: Transaction[];
+  onClose: () => void;
+}
+function CategoryBottomSheet({ category, color, total, pct, transactions, onClose }: BottomSheetProps) {
+  const Icon = CATEGORY_ICONS[category] || Info;
+  const emoji = CATEGORY_EMOJIS[category] || '📦';
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex flex-col justify-end"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+    >
+      {/* backdrop */}
+      <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={onClose} />
+
+      <motion.div
+        className="relative bg-white rounded-t-3xl shadow-2xl max-h-[75vh] flex flex-col"
+        initial={{ y: '100%' }}
+        animate={{ y: 0 }}
+        exit={{ y: '100%' }}
+        transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+      >
+        {/* drag handle */}
+        <div className="flex justify-center pt-3 pb-1">
+          <div className="w-10 h-1 bg-slate-200 rounded-full" />
+        </div>
+
+        {/* Header */}
+        <div className="px-5 py-4 flex items-center justify-between border-b border-slate-100">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-2xl flex items-center justify-center" style={{ backgroundColor: color + '22' }}>
+              <Icon className="w-5 h-5" style={{ color }} />
+            </div>
+            <div>
+              <p className="font-black text-slate-800 text-lg">{category}</p>
+              <p className="text-xs text-slate-400">{pct}% of this month's spending</p>
+            </div>
+          </div>
+          <div className="text-right">
+            <p className="font-black text-slate-800 text-xl tabular-nums">${total.toFixed(2)}</p>
+            <button onClick={onClose} className="text-slate-300 hover:text-slate-500">
+              <X className="w-5 h-5 mt-1" />
+            </button>
+          </div>
+        </div>
+
+        {/* Transaction list */}
+        <div className="overflow-y-auto flex-1 px-4 py-3 space-y-2">
+          {transactions.length === 0 && (
+            <p className="text-center text-slate-400 text-sm py-8">No transactions</p>
+          )}
+          {transactions.map(t => (
+            <div key={t.id} className="bg-slate-50 rounded-2xl px-4 py-3 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold text-slate-700">{t.description || category}</p>
+                <p className="text-xs text-slate-400">{format(new Date(t.date), 'EEE, d MMM · h:mm a')}</p>
+              </div>
+              <p className="font-bold text-slate-600 tabular-nums text-sm">
+                ${(t.amount / t.splitBy).toFixed(2)}
+              </p>
+            </div>
+          ))}
+        </div>
+      </motion.div>
+    </motion.div>
   );
 }
 
@@ -160,6 +251,7 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
   const availableMonths = getAvailableMonths(transactions);
   const [selectedMonthIdx, setSelectedMonthIdx] = useState(0);
   const [activeSlice, setActiveSlice] = useState<number | null>(null);
+  const [sheetCategory, setSheetCategory] = useState<string | null>(null);
 
   const selectedMonth = availableMonths[selectedMonthIdx] ?? startOfMonth(new Date());
   const monthEnd = endOfMonth(selectedMonth);
@@ -168,7 +260,6 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
     isWithinInterval(new Date(t.date), { start: selectedMonth, end: monthEnd })
   );
 
-  // Use the ratio from settings, not hardcoded 0.7
   const spendBudget = settings.income * settings.needsRatio;
 
   const categoryData = monthlyTransactions.reduce((acc, t) => {
@@ -186,16 +277,22 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
   const percentOfBudget = spendBudget > 0 ? (totalSpent / spendBudget) * 100 : 0;
   const activeItem = activeSlice !== null ? chartData[activeSlice] : null;
 
+  const openSheet = (catName: string) => setSheetCategory(catName);
+  const closeSheet = () => setSheetCategory(null);
+
+  const sheetData = sheetCategory
+    ? { cat: sheetCategory, items: monthlyTransactions.filter(t => t.category === sheetCategory), idx: chartData.findIndex(d => d.name === sheetCategory) }
+    : null;
+
   return (
-    <div className="flex flex-col bg-slate-50 min-h-full">
+    <div className="flex flex-col bg-slate-50 min-h-full relative">
       <header className="px-6 pt-6 pb-4 bg-white shadow-sm sticky top-0 z-10">
         <h1 className="font-black text-xl text-slate-800">Insights</h1>
         <p className="text-xs text-slate-400 mt-0.5">Your spending breakdown & savings progress</p>
       </header>
 
       <div className="px-4 py-5 space-y-5">
-
-        {/* ── Savings Goal Card (always at top) ── */}
+        {/* ── Savings Goal Card ── */}
         <GoalProgressCard settings={settings} />
 
         {/* Month Selector */}
@@ -252,7 +349,10 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
                     <Pie data={chartData} cx="50%" cy="50%"
                       innerRadius={68} outerRadius={98}
                       paddingAngle={3} dataKey="value"
-                      onClick={(_: any, index: number) => setActiveSlice(activeSlice === index ? null : index)}
+                      onClick={(_: any, index: number) => {
+                        setActiveSlice(activeSlice === index ? null : index);
+                        openSheet(chartData[index].name);
+                      }}
                       activeIndex={activeSlice !== null ? activeSlice : undefined}
                       activeShape={renderActiveShape}
                       animationBegin={0} animationDuration={800}>
@@ -279,10 +379,10 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
                   )}
                 </div>
               </div>
-              <p className="text-xs text-center text-slate-400 mt-2">Tap a slice to see details</p>
+              <p className="text-xs text-center text-slate-400 mt-2">Tap a slice for full details</p>
             </div>
 
-            {/* Category Legend */}
+            {/* Category Legend — tapping opens bottom sheet */}
             <div className="space-y-2 pb-6">
               {chartData.map((item, index) => {
                 const Icon = CATEGORY_ICONS[item.name] || Info;
@@ -292,7 +392,7 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
                 return (
                   <motion.button key={item.name}
                     whileTap={{ scale: 0.98 }}
-                    onClick={() => setActiveSlice(isActive ? null : index)}
+                    onClick={() => { setActiveSlice(isActive ? null : index); openSheet(item.name); }}
                     className={`w-full rounded-2xl px-4 py-3 flex items-center justify-between transition-all ${
                       isActive ? 'bg-slate-900 shadow-lg' : 'bg-white border border-slate-100 shadow-sm'
                     }`}>
@@ -303,9 +403,12 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
                       </div>
                       <span className={`font-semibold text-sm ${isActive ? 'text-white' : 'text-slate-700'}`}>{item.name}</span>
                     </div>
-                    <div className="text-right">
-                      <p className={`font-bold text-sm tabular-nums ${isActive ? 'text-white' : 'text-slate-600'}`}>${item.value.toFixed(2)}</p>
-                      <p className={`text-xs ${isActive ? 'text-slate-300' : 'text-slate-400'}`}>{pct}%</p>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <p className={`font-bold text-sm tabular-nums ${isActive ? 'text-white' : 'text-slate-600'}`}>${item.value.toFixed(2)}</p>
+                        <p className={`text-xs ${isActive ? 'text-slate-300' : 'text-slate-400'}`}>{pct}%</p>
+                      </div>
+                      <ChevronRight className={`w-4 h-4 ${isActive ? 'text-slate-400' : 'text-slate-300'}`} />
                     </div>
                   </motion.button>
                 );
@@ -320,6 +423,20 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
           </div>
         )}
       </div>
+
+      {/* ── Category Bottom Sheet ── */}
+      <AnimatePresence>
+        {sheetData && (
+          <CategoryBottomSheet
+            category={sheetData.cat}
+            color={PALETTE[sheetData.idx % PALETTE.length]}
+            total={categoryData[sheetData.cat] ?? 0}
+            pct={((categoryData[sheetData.cat] / totalSpent) * 100).toFixed(1)}
+            transactions={sheetData.items}
+            onClose={closeSheet}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -31,9 +31,11 @@ const DEFAULT_SETTINGS: UserSettings = {
   isOnboarded: false,
   streakCount: 0,
   lastLogDate: null,
+  trackingStartDate: null,
   savingsGoalName: '',
   savingsGoalAmount: 0,
   savingsGoalDate: null,
+  savingsGoals: [],
   paydayDay: 1,
   needsRatio: 0.70,
   savingsRatio: 0.20,
@@ -133,12 +135,17 @@ export default function App() {
   const [milestoneRollover, setMilestoneRollover] = useState(0);
   const [puppyCelebration, setPuppyCelebration] = useState(false);
 
-  // Back Tap / Shortcut auto-open
+  // Auto-open Quick Log every time the user opens the app (if onboarded)
+  // Also handles the legacy ?log=true URL parameter from shortcuts
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     if (params.get('log') === 'true') {
-      setIsQuickEntryOpen(true);
       window.history.replaceState({}, '', window.location.pathname);
+    }
+    if (settings.isOnboarded) {
+      // Small delay so the dashboard has time to render first
+      const t = setTimeout(() => setIsQuickEntryOpen(true), 400);
+      return () => clearTimeout(t);
     }
   }, []);
 
@@ -205,7 +212,10 @@ export default function App() {
   }, [settings.isOnboarded]);
 
   const handleSetupComplete = (newSettings: Partial<UserSettings>) => {
-    setSettings(prev => ({ ...prev, ...newSettings }));
+    const now = new Date().toISOString();
+    setSettings(prev => ({ ...prev, ...newSettings, trackingStartDate: prev.trackingStartDate ?? now }));
+    // Auto-open quick log after onboarding completes
+    setTimeout(() => setIsQuickEntryOpen(true), 600);
   };
 
   const handleSaveEntry = useCallback((entry: Omit<Transaction, 'id' | 'date'>) => {

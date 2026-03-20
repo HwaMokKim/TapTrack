@@ -1,8 +1,8 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Info, Utensils, Coffee, Zap, Car, Bus, Home, ShoppingBag } from 'lucide-react';
+import { Plus, Info, Utensils, Coffee, Zap, Car, Bus, Home, ShoppingBag, Flame } from 'lucide-react';
 import { Transaction, UserSettings, FIXED_CATEGORIES } from '../types';
-import { format } from 'date-fns';
+import { format, differenceInDays } from 'date-fns';
 
 interface BudgetInfo {
   dailyLimit: number;
@@ -39,114 +39,143 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const isOverBudget = safeToSpendNow < 0;
   const gaugePercent = Math.max(0, Math.min(100, (safeToSpendNow / Math.max(1, dailyLimit)) * 100));
 
+  // --- Streak / Tracking Days ---
+  const trackingDays = settings.trackingStartDate
+    ? Math.max(1, differenceInDays(new Date(), new Date(settings.trackingStartDate)) + 1)
+    : 0;
+  const streak = settings.streakCount || 0;
+
   const getPuppyMessage = () => {
     if (puppyCelebration) return "Logged! You're on a roll! 🎾";
     if (isOverBudget) return "We'll roll it forward and adjust tomorrow's budget. You've got this! 🐾";
     if (safeToSpendNow < dailyLimit * 0.15) return "Almost at your daily limit — so close to a perfect day! 🦴";
     if (transactions.length === 0) return "Today's a blank canvas. Tap Quick Log and let's start! 🐶";
     if (settings.weeklyRollover > 0) return `You've stashed an extra $${settings.weeklyRollover.toFixed(0)} in savings this week! 🏆`;
-    return settings.savingsGoalName
-      ? `Keep it up! "${settings.savingsGoalName}" is getting closer. 🎯`
-      : 'Great job staying on track today! 🎾';
+    // Show first savings goal if available
+    const primaryGoal = settings.savingsGoals?.[0];
+    return primaryGoal
+      ? `Keep it up! "${primaryGoal.name}" is getting closer. 🎯`
+      : settings.savingsGoalName
+        ? `Keep it up! "${settings.savingsGoalName}" is getting closer. 🎯`
+        : 'Great job staying on track today! 🎾';
   };
 
   const todayStr = new Date().toISOString().split('T')[0];
   const todaysLogs = transactions.filter(t => t.date.startsWith(todayStr));
 
   return (
-    // Outer wrapper: full screen, no scroll on this shell
+    // Outer wrapper: full screen, flex col
     <div className="flex flex-col bg-white h-full overflow-hidden">
 
       {/* ── Sticky Header ── */}
-      <header className="flex-shrink-0 px-6 pt-5 pb-3 flex justify-between items-center">
+      <header className="flex-shrink-0 px-5 pt-5 pb-2 flex justify-between items-center">
         <div className="font-black text-lg tracking-tight text-slate-800">
           Tap<span className="text-orange-500">Track</span>
         </div>
-        <motion.button
-          onClick={onQuickEntry}
-          whileTap={{ scale: 0.93 }}
-          className="flex items-center gap-1.5 bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-full shadow-md"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          Log
-        </motion.button>
+        {/* Streak / Tracking Days Pill */}
+        <div className="flex items-center gap-2">
+          {streak > 0 && (
+            <div className="flex items-center gap-1 bg-orange-50 border border-orange-100 px-2.5 py-1 rounded-full">
+              <Flame className="w-3.5 h-3.5 text-orange-500" />
+              <span className="text-xs font-bold text-orange-500">{streak}d</span>
+            </div>
+          )}
+          {trackingDays > 0 && (
+            <div className="text-[10px] font-semibold text-slate-400 bg-slate-50 border border-slate-100 px-2.5 py-1 rounded-full whitespace-nowrap">
+              {trackingDays} {trackingDays === 1 ? 'day' : 'days'} tracked
+            </div>
+          )}
+        </div>
       </header>
 
       {/* ── Scrollable body ── */}
       <div className="flex-1 overflow-y-auto">
 
         {/* ════ ABOVE-FOLD HERO ════ */}
-        {/* Uses a flex column that takes full remaining height (dvh - header - nav bar approx) */}
-        <div className="flex flex-col items-center justify-between px-6 pt-8 pb-4 text-center"
-          style={{ minHeight: 'calc(100dvh - 160px)' }}
+        <div className="flex flex-col items-center px-6 text-center"
+          style={{ minHeight: 'calc(100dvh - 200px)' }}
         >
-          <div className="flex flex-col items-center justify-center flex-1 w-full">
-            {/* Safe to Spend label */}
+          {/* Safe to Spend — vertically centered in upper 2/3 */}
+          <div className="flex flex-col items-center justify-center flex-1">
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 mb-3">
               Safe to Spend Today
             </p>
 
-          {/* Big Number */}
-          <AnimatePresence mode="wait">
-            <motion.p
-              key={safeToSpendNow.toFixed(0)}
-              initial={{ opacity: 0, scale: 0.88, y: 8 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 1.04 }}
-              transition={{ type: 'spring', damping: 20, stiffness: 200 }}
-              className={`font-black tabular-nums leading-none ${
-                isOverBudget ? 'text-slate-300' : 'text-slate-900'
-              }`}
-              style={{ fontSize: 'clamp(64px, 18vw, 96px)' }}
-            >
-              ${Math.abs(safeToSpendNow).toFixed(2)}
-            </motion.p>
-          </AnimatePresence>
+            {/* Big Number */}
+            <AnimatePresence mode="wait">
+              <motion.p
+                key={safeToSpendNow.toFixed(0)}
+                initial={{ opacity: 0, scale: 0.88, y: 8 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 1.04 }}
+                transition={{ type: 'spring', damping: 20, stiffness: 200 }}
+                className={`font-black tabular-nums leading-none ${
+                  isOverBudget ? 'text-slate-300' : 'text-slate-900'
+                }`}
+                style={{ fontSize: 'clamp(64px, 18vw, 96px)' }}
+              >
+                ${Math.abs(safeToSpendNow).toFixed(2)}
+              </motion.p>
+            </AnimatePresence>
 
-          {isOverBudget && (
-            <p className="text-xs text-slate-400 mt-2">
-              Overspent by ${Math.abs(safeToSpendNow).toFixed(2)} — adjusts tomorrow
-            </p>
-          )}
+            {isOverBudget && (
+              <p className="text-xs text-slate-400 mt-2">
+                Overspent by ${Math.abs(safeToSpendNow).toFixed(2)} — adjusts tomorrow
+              </p>
+            )}
 
-          {/* Thin gauge line */}
-          <div className="w-40 h-1 bg-slate-100 rounded-full overflow-hidden mt-5">
-            <motion.div
-              className={`h-full rounded-full ${isOverBudget ? 'bg-slate-200' : 'bg-orange-400'}`}
-              initial={{ width: 0 }}
-              animate={{ width: `${gaugePercent}%` }}
-              transition={{ type: 'spring', damping: 22, stiffness: 80 }}
-            />
-          </div>
+            {/* Thin gauge line */}
+            <div className="w-40 h-1 bg-slate-100 rounded-full overflow-hidden mt-5">
+              <motion.div
+                className={`h-full rounded-full ${isOverBudget ? 'bg-slate-200' : 'bg-orange-400'}`}
+                initial={{ width: 0 }}
+                animate={{ width: `${gaugePercent}%` }}
+                transition={{ type: 'spring', damping: 22, stiffness: 80 }}
+              />
+            </div>
             <p className="text-[11px] text-slate-400 mt-2">
               ${spentToday.toFixed(2)} of ${dailyLimit.toFixed(2)} spent
             </p>
           </div>
 
-          {/* Dog — sits at the bottom of the hero zone, no top margin needed since flex-between pushes it down */}
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={puppyCelebration ? 'celeb' : getPuppyMessage()}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -4 }}
-              transition={{ duration: 0.35 }}
-              className="flex items-center gap-3 w-full max-w-xs bg-slate-50/50 rounded-2xl p-3"
-            >
-              <motion.span
-                animate={puppyCelebration
-                  ? { rotate: [0, -14, 14, -8, 8, 0], scale: [1, 1.18, 1] }
-                  : {}}
-                transition={{ duration: 0.7 }}
-                className="text-4xl select-none flex-shrink-0"
+          {/* ── BOTTOM STACK: Dog → Quick Log Button ── */}
+          <div className="w-full flex flex-col items-center gap-3 pb-5">
+            {/* Dog motivation */}
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={puppyCelebration ? 'celeb' : getPuppyMessage()}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -4 }}
+                transition={{ duration: 0.35 }}
+                className="flex items-center gap-3 w-full max-w-xs bg-slate-50 border border-slate-100 rounded-2xl px-4 py-3"
               >
-                🐶
-              </motion.span>
-              <p className="text-sm text-slate-500 font-medium leading-snug text-left">
-                {getPuppyMessage()}
-              </p>
-            </motion.div>
-          </AnimatePresence>
+                <motion.span
+                  animate={puppyCelebration
+                    ? { rotate: [0, -14, 14, -8, 8, 0], scale: [1, 1.18, 1] }
+                    : {}}
+                  transition={{ duration: 0.7 }}
+                  className="text-3xl select-none flex-shrink-0"
+                >
+                  🐶
+                </motion.span>
+                <p className="text-sm text-slate-500 font-medium leading-snug text-left">
+                  {getPuppyMessage()}
+                </p>
+              </motion.div>
+            </AnimatePresence>
+
+            {/* Big Quick Log Button */}
+            <motion.button
+              onClick={onQuickEntry}
+              whileTap={{ scale: 0.95 }}
+              whileHover={{ scale: 1.02 }}
+              className="w-full max-w-xs flex items-center justify-center gap-2 bg-slate-900 text-white font-bold text-base py-4 rounded-2xl shadow-lg"
+            >
+              <Plus className="w-5 h-5" />
+              Quick Log
+            </motion.button>
+          </div>
         </div>
 
         {/* ════ BELOW-FOLD: TODAY'S LOGS ════ */}

@@ -314,39 +314,89 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
           </div>
         </div>
 
-        {/* Savings Goal */}
+        {/* Savings Goals — up to 3 */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
-          <div className="px-5 pt-4 pb-3 border-b border-slate-50">
-            <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Savings Goal</h2>
-          </div>
-          <div className="px-5 py-4 space-y-4">
-            <div>
-              <label className="text-xs font-medium text-slate-500 block mb-1.5">Goal Name</label>
-              <input type="text" placeholder="e.g. Japan Trip, New MacBook..."
-                value={settings.savingsGoalName || ''}
-                onChange={e => onUpdateSettings({ savingsGoalName: e.target.value })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 outline-none focus:border-orange-400" />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-500 block mb-1.5">Goal Amount ($)</label>
-              <input type="number" placeholder="0.00"
-                value={settings.savingsGoalAmount || ''}
-                onChange={e => onUpdateSettings({ savingsGoalAmount: parseFloat(e.target.value) || 0 })}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 outline-none focus:border-orange-400" />
-            </div>
-            {/* Apple-style date picker */}
-            <GoalDatePicker
-              value={settings.savingsGoalDate || null}
-              onChange={v => onUpdateSettings({ savingsGoalDate: v })}
-            />
-            {goalSummary && (
-              <div className="bg-orange-50 rounded-xl p-3 flex items-start gap-2">
-                <Target className="w-4 h-4 text-orange-500 flex-shrink-0 mt-0.5" />
-                <p className="text-xs text-orange-700 leading-relaxed">{goalSummary}</p>
-              </div>
+          <div className="px-5 pt-4 pb-3 border-b border-slate-50 flex items-center justify-between">
+            <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Savings Goals</h2>
+            {(settings.savingsGoals?.length ?? 0) < 3 && (
+              <button
+                onClick={() => {
+                  const newGoal = { id: Date.now().toString(), name: '', amount: 0, targetDate: null, savedSoFar: 0 };
+                  onUpdateSettings({ savingsGoals: [...(settings.savingsGoals ?? []), newGoal] });
+                }}
+                className="text-xs font-bold text-orange-500 bg-orange-50 px-3 py-1 rounded-full"
+              >
+                + Add Goal
+              </button>
             )}
           </div>
+          <div className="px-5 py-4 space-y-6">
+            {(settings.savingsGoals?.length ?? 0) === 0 && (
+              <p className="text-xs text-slate-400 text-center py-2">
+                No goals yet. Tap "+ Add Goal" to save for something you love! 🎯
+              </p>
+            )}
+            {(settings.savingsGoals ?? []).map((goal, gi) => {
+              const goalDate = goal.targetDate ? parseISO(goal.targetDate) : null;
+              const savingsMonthly = settings.income * settings.savingsRatio;
+              let goalSummary = '';
+              if (goal.amount > 0 && savingsMonthly > 0) {
+                if (goalDate) {
+                  const monthsLeft = Math.max(1, differenceInMonths(goalDate, new Date()));
+                  goalSummary = `Save $${(goal.amount / monthsLeft).toFixed(0)}/mo to reach by ${format(goalDate, 'MMM yyyy')}`;
+                } else {
+                  const months = Math.ceil(goal.amount / savingsMonthly);
+                  goalSummary = `~${months} months at $${savingsMonthly.toFixed(0)}/mo`;
+                }
+              }
+              return (
+                <div key={goal.id} className="border border-slate-100 rounded-2xl p-4 space-y-3 relative">
+                  <button
+                    onClick={() => onUpdateSettings({ savingsGoals: (settings.savingsGoals ?? []).filter((_, i) => i !== gi) })}
+                    className="absolute top-3 right-3 text-slate-300 hover:text-red-400 transition-colors text-lg leading-none"
+                  >×</button>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 block mb-1.5">Goal Name</label>
+                    <input type="text" placeholder="e.g. Japan Trip, New MacBook..."
+                      value={goal.name}
+                      onChange={e => {
+                        const updated = [...(settings.savingsGoals ?? [])];
+                        updated[gi] = { ...updated[gi], name: e.target.value };
+                        onUpdateSettings({ savingsGoals: updated });
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 outline-none focus:border-orange-400" />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 block mb-1.5">Goal Amount ($)</label>
+                    <input type="number" placeholder="0.00"
+                      value={goal.amount || ''}
+                      onChange={e => {
+                        const updated = [...(settings.savingsGoals ?? [])];
+                        updated[gi] = { ...updated[gi], amount: parseFloat(e.target.value) || 0 };
+                        onUpdateSettings({ savingsGoals: updated });
+                      }}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm text-slate-800 placeholder:text-slate-300 outline-none focus:border-orange-400" />
+                  </div>
+                  <GoalDatePicker
+                    value={goal.targetDate}
+                    onChange={v => {
+                      const updated = [...(settings.savingsGoals ?? [])];
+                      updated[gi] = { ...updated[gi], targetDate: v };
+                      onUpdateSettings({ savingsGoals: updated });
+                    }}
+                  />
+                  {goalSummary && (
+                    <div className="bg-orange-50 rounded-xl p-3 flex items-start gap-2">
+                      <Target className="w-4 h-4 text-orange-500 flex-shrink-0 mt-0.5" />
+                      <p className="text-xs text-orange-700 leading-relaxed">{goalSummary}</p>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </div>
+
 
         {/* Payday */}
         <div className="bg-white rounded-2xl border border-slate-100 shadow-sm">
