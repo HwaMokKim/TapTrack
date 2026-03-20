@@ -93,7 +93,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
         {/* ════ ABOVE-FOLD HERO ════ */}
         <div className="flex flex-col items-center px-6 text-center"
-          style={{ minHeight: 'calc(100dvh - 200px)' }}
+          style={{ minHeight: 'calc(100svh - 200px)' }}
         >
           {/* Safe to Spend — vertically centered in upper 2/3 */}
           <div className="flex flex-col items-center justify-center flex-1">

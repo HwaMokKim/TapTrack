@@ -260,8 +260,8 @@ export default function App() {
 
   if (!settings.isOnboarded) {
     return (
-      <div className="h-screen w-full bg-slate-900 flex justify-center sm:py-8">
-        <div className="w-full max-w-md bg-slate-50 sm:rounded-3xl sm:shadow-2xl overflow-hidden relative">
+      <div style={{ height: '100svh' }} className="w-full bg-slate-900 flex justify-center sm:py-8">
+        <div className="w-full max-w-md bg-slate-50 sm:rounded-3xl sm:shadow-2xl overflow-hidden relative flex flex-col">
           <SetupWizard onComplete={handleSetupComplete} />
         </div>
       </div>
@@ -276,8 +276,8 @@ export default function App() {
   const budgetInfo = calcDailyBudget(transactions, settings);
 
   return (
-    <div className="h-screen w-full bg-slate-900 flex justify-center sm:py-8">
-      {/* Phone shell: strictly h-screen, flex-col, no overflow at this level */}
+    <div style={{ height: '100svh' }} className="w-full bg-slate-900 flex justify-center sm:py-8">
+      {/* Phone shell: strictly 100svh, flex-col, no overflow at this level */}
       <div className="w-full max-w-md bg-slate-50 sm:rounded-3xl sm:shadow-2xl relative flex flex-col overflow-hidden">
 
         {/* Tab Content — scrollable middle area only */}
@@ -331,8 +331,10 @@ export default function App() {
           </AnimatePresence>
         </div>
 
-        {/* Bottom Navigation — always visible, never scrolls */}
-        <nav className="flex-shrink-0 relative z-30 bg-white border-t border-slate-100 shadow-lg">
+        {/* Bottom Navigation — always visible, safe-area aware */}
+        <nav className="flex-shrink-0 relative z-30 bg-white border-t border-slate-100 shadow-lg"
+          style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        >
           <div className="flex items-center">
             {TABS.map(({ id, label, Icon }) => {
               const isActive = activeTab === id;

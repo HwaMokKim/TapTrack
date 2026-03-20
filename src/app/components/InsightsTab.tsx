@@ -349,10 +349,6 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
                     <Pie data={chartData} cx="50%" cy="50%"
                       innerRadius={68} outerRadius={98}
                       paddingAngle={3} dataKey="value"
-                      onClick={(_: any, index: number) => {
-                        setActiveSlice(activeSlice === index ? null : index);
-                        openSheet(chartData[index].name);
-                      }}
                       activeIndex={activeSlice !== null ? activeSlice : undefined}
                       activeShape={renderActiveShape}
                       animationBegin={0} animationDuration={800}>
