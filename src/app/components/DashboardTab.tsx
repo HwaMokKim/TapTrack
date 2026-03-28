@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { Plus, Info, Utensils, Coffee, Zap, Car, Bus, Home, ShoppingBag, Flame } from 'lucide-react';
-import { Transaction, UserSettings, FIXED_CATEGORIES } from '../types';
+import { Plus, Info, Utensils, Coffee, Zap, Car, Bus, Home, ShoppingBag, Flame, ChevronUp, ChevronDown } from 'lucide-react';
+import { Transaction, UserSettings, FIXED_CATEGORIES, formatCurrency, getCurrencySymbol } from '../types';
 import { format, differenceInDays } from 'date-fns';
 
 interface BudgetInfo {
@@ -50,7 +50,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     if (isOverBudget) return "We'll roll it forward and adjust tomorrow's budget. You've got this! 🐾";
     if (safeToSpendNow < dailyLimit * 0.15) return "Almost at your daily limit — so close to a perfect day! 🦴";
     if (transactions.length === 0) return "Today's a blank canvas. Tap Quick Log and let's start! 🐶";
-    if (settings.weeklyRollover > 0) return `You've stashed an extra $${settings.weeklyRollover.toFixed(0)} in savings this week! 🏆`;
+    if (settings.weeklyRollover > 0) return `You've stashed an extra ${formatCurrency(settings.weeklyRollover, settings.currency)} in savings this week! 🏆`;
     // Show first savings goal if available
     const primaryGoal = settings.savingsGoals?.[0];
     return primaryGoal
@@ -68,23 +68,34 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     <div className="flex flex-col bg-white h-full overflow-hidden">
 
       {/* ── Sticky Header ── */}
-      <header className="flex-shrink-0 px-5 pt-5 pb-2 flex justify-between items-center">
+      <header className="flex-shrink-0 px-5 pt-5 pb-2 flex justify-between items-center relative z-20">
         <div className="font-black text-lg tracking-tight text-slate-800">
           Tap<span className="text-orange-500">Track</span>
         </div>
         {/* Streak / Tracking Days Pill */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 relative">
           {streak > 0 && (
             <div className="flex items-center gap-1 bg-orange-50 border border-orange-100 px-2.5 py-1 rounded-full">
               <Flame className="w-3.5 h-3.5 text-orange-500" />
               <span className="text-xs font-bold text-orange-500">{streak}d</span>
             </div>
           )}
-          {trackingDays > 0 && (
-            <div className="text-[10px] font-semibold text-slate-400 bg-slate-50 border border-slate-100 px-2.5 py-1 rounded-full whitespace-nowrap">
-              {trackingDays} {trackingDays === 1 ? 'day' : 'days'} tracked
-            </div>
-          )}
+          
+          {/* Coach Mark 1: Streak */}
+          <AnimatePresence>
+            {transactions.length === 0 && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9, y: -10 }} 
+                animate={{ opacity: 1, scale: 1, y: [0, 5, 0] }} 
+                exit={{ opacity: 0, scale: 0.9 }}
+                transition={{ delay: 1, opacity: { duration: 0.4 }, y: { repeat: Infinity, duration: 2, ease: "easeInOut" } }}
+                className="absolute top-full mt-3 right-0 bg-blue-500 text-white text-xs font-bold px-3 py-2.5 rounded-xl shadow-lg w-40 text-center pointer-events-none"
+              >
+                <div className="absolute -top-1 right-6 w-3 h-3 bg-blue-500 rotate-45 rounded-sm" />
+                Build your streak by logging every day!
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </header>
 
@@ -109,18 +120,24 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 1.04 }}
                 transition={{ type: 'spring', damping: 20, stiffness: 200 }}
-                className={`font-black tabular-nums leading-none ${
+                className={`font-black tabular-nums leading-none max-w-full overflow-hidden text-ellipsis whitespace-nowrap px-4 ${
                   isOverBudget ? 'text-slate-300' : 'text-slate-900'
                 }`}
-                style={{ fontSize: 'clamp(64px, 18vw, 96px)' }}
+                style={{ 
+                  fontSize: formatCurrency(Math.abs(safeToSpendNow), settings.currency).length > 10 
+                    ? 'clamp(28px, 10vw, 56px)' 
+                    : formatCurrency(Math.abs(safeToSpendNow), settings.currency).length > 7
+                      ? 'clamp(32px, 12vw, 72px)'
+                      : 'clamp(40px, 15vw, 96px)' 
+                }}
               >
-                ${Math.abs(safeToSpendNow).toFixed(2)}
+                {formatCurrency(Math.abs(safeToSpendNow), settings.currency)}
               </motion.p>
             </AnimatePresence>
 
             {isOverBudget && (
               <p className="text-xs text-slate-400 mt-2">
-                Overspent by ${Math.abs(safeToSpendNow).toFixed(2)} — adjusts tomorrow
+                Overspent by {formatCurrency(Math.abs(safeToSpendNow), settings.currency)} — adjusts tomorrow
               </p>
             )}
 
@@ -134,12 +151,28 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               />
             </div>
             <p className="text-[11px] text-slate-400 mt-2">
-              ${spentToday.toFixed(2)} of ${dailyLimit.toFixed(2)} spent
+              {formatCurrency(spentToday, settings.currency)} of {formatCurrency(dailyLimit, settings.currency)} spent
             </p>
           </div>
 
           {/* ── BOTTOM STACK: Dog → Quick Log Button ── */}
-          <div className="w-full flex flex-col items-center gap-3 pb-5">
+          <div className="w-full flex flex-col items-center gap-3 pb-5 relative">
+            {/* Coach Mark 2: Quick Log */}
+            <AnimatePresence>
+              {transactions.length === 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.9, y: 10 }} 
+                  animate={{ opacity: 1, scale: 1, y: [0, -5, 0] }} 
+                  exit={{ opacity: 0, scale: 0.9 }}
+                  transition={{ delay: 2, opacity: { duration: 0.4 }, y: { repeat: Infinity, duration: 2, ease: "easeInOut" } }}
+                  className="absolute -top-14 bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg pointer-events-none z-10"
+                >
+                  Tap here to log your first entry! 
+                  <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-blue-500 rotate-45 rounded-sm" />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
             {/* Dog motivation */}
             <AnimatePresence mode="wait">
               <motion.div
@@ -226,8 +259,8 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                         </p>
                       </div>
                     </div>
-                    <p className="font-bold text-sm text-slate-600 tabular-nums">
-                      ${effectiveAmount.toFixed(2)}
+                    <p className={`font-bold text-sm tabular-nums ${t.isIncome ? 'text-emerald-500' : 'text-slate-600'}`}>
+                      {t.isIncome ? '+' : ''}{formatCurrency(effectiveAmount, settings.currency)}
                     </p>
                   </motion.div>
                 );

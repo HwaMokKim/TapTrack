@@ -2,10 +2,11 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { format, isToday, isYesterday, isSameDay } from 'date-fns';
 import { Coffee, Utensils, Zap, Car, Bus, Home, ShoppingBag, Info, SlidersHorizontal, X } from 'lucide-react';
-import { Transaction } from '../types';
+import { Transaction, UserSettings, formatCurrency } from '../types';
 
 interface HistoryTabProps {
   transactions: Transaction[];
+  settings: UserSettings;
   onSelectTransaction: (t: Transaction) => void;
 }
 
@@ -62,7 +63,7 @@ function groupTransactions(transactions: Transaction[], filterCat: string | null
   return Array.from(monthMap.values());
 }
 
-export const HistoryTab: React.FC<HistoryTabProps> = ({ transactions, onSelectTransaction }) => {
+export const HistoryTab: React.FC<HistoryTabProps> = ({ transactions, settings, onSelectTransaction }) => {
   const [filterCat, setFilterCat] = useState<string | null>(null);
 
   // Derive unique categories that exist in transaction log
@@ -78,7 +79,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({ transactions, onSelectTr
           <div>
             <h1 className="font-black text-xl text-slate-800">History</h1>
             <p className="text-xs text-slate-400 mt-0.5">
-              {filterCat ? `${filterCat} · $${filteredTotal.toFixed(2)} total` : 'All your expense logs'}
+              {filterCat ? `${filterCat} · ${formatCurrency(filteredTotal, settings.currency)} total` : 'All your expense logs'}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -146,7 +147,7 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({ transactions, onSelectTr
             {/* Month Header */}
             <div className="flex items-center justify-between mb-3 px-2">
               <h2 className="text-base font-black text-slate-800">{monthGroup.monthLabel}</h2>
-              <span className="text-sm font-semibold text-slate-400">${monthGroup.total.toFixed(2)}</span>
+              <span className="text-sm font-semibold text-slate-400">{formatCurrency(monthGroup.total, settings.currency)}</span>
             </div>
 
             <div className="space-y-4">
@@ -188,11 +189,11 @@ export const HistoryTab: React.FC<HistoryTabProps> = ({ transactions, onSelectTr
                             </div>
                           </div>
                           <div className="text-right">
-                            <p className="font-bold text-slate-600 tabular-nums text-sm">
-                              ${effectiveAmount.toFixed(2)}
+                            <p className={`font-bold tabular-nums text-sm ${t.isIncome ? 'text-emerald-500' : 'text-slate-600'}`}>
+                              {t.isIncome ? '+' : ''}{formatCurrency(effectiveAmount, settings.currency)}
                             </p>
                             {t.splitBy > 1 && (
-                              <p className="text-[10px] text-slate-400">Total ${t.amount.toFixed(2)}</p>
+                              <p className="text-[10px] text-slate-400">Total {formatCurrency(t.amount, settings.currency)}</p>
                             )}
                           </div>
                         </motion.div>

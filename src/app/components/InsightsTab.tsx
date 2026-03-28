@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Sector } from 'recharts';
 import { Coffee, Utensils, Zap, Car, Bus, Home, ShoppingBag, Info, Target, TrendingUp, Gift, X, ChevronRight } from 'lucide-react';
-import { Transaction, UserSettings } from '../types';
+import { Transaction, UserSettings, formatCurrency } from '../types';
 import { format, startOfMonth, endOfMonth, isWithinInterval, addMonths, differenceInMonths, parseISO } from 'date-fns';
 
 interface InsightsTabProps {
@@ -12,6 +12,7 @@ interface InsightsTabProps {
     dailyLimit: number; spentToday: number; monthlyPool: number;
     monthlyFixed: number; monthlySpent: number; daysLeftInMonth: number;
   };
+  onUpdateSettings: (s: Partial<UserSettings>) => void;
 }
 
 const PALETTE = ['#f97316', '#3b82f6', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4', '#f59e0b', '#14b8a6'];
@@ -48,11 +49,23 @@ function getAvailableMonths(transactions: Transaction[]): Date[] {
 // ── Savings Goal Progress Card (multi-goal aware) ─────────────────────────────
 function GoalProgressCard({ settings }: { settings: UserSettings }) {
   // Prefer the new multi-goal array; fall back to legacy single-goal fields
-  const goals = settings.savingsGoals?.length
-    ? settings.savingsGoals
+  let goals = settings.savingsGoals?.length
+    ? [...settings.savingsGoals]
     : settings.savingsGoalAmount
       ? [{ id: 'legacy', name: settings.savingsGoalName || 'My Goal', amount: settings.savingsGoalAmount, targetDate: settings.savingsGoalDate, savedSoFar: settings.totalSaved || 0 }]
       : [];
+
+  // Sort logic: Priority ⭐ first, then earliest TargetDate, then Name.
+  goals.sort((a, b) => {
+    if (a.id === settings.priorityGoalId) return -1;
+    if (b.id === settings.priorityGoalId) return 1;
+    if (a.targetDate && b.targetDate) {
+      return parseISO(a.targetDate).getTime() - parseISO(b.targetDate).getTime();
+    }
+    if (a.targetDate) return -1;
+    if (b.targetDate) return 1;
+    return (a.name || '').localeCompare(b.name || '');
+  });
 
   const weeklyRollover = settings.weeklyRollover || 0;
   const savingsMonthly = settings.income * settings.savingsRatio;
@@ -71,10 +84,10 @@ function GoalProgressCard({ settings }: { settings: UserSettings }) {
     if (goalDate) {
       const monthsLeft = Math.max(1, differenceInMonths(goalDate, new Date()));
       const needed = goalAmount / monthsLeft;
-      etaLine = `Need $${needed.toFixed(0)}/mo to hit ${format(goalDate, 'MMM yyyy')}`;
+      etaLine = `Need ${formatCurrency(needed, settings.currency)}/mo to hit ${format(goalDate, 'MMM yyyy')}`;
     } else {
       const monthsNeeded = Math.ceil(Math.max(0, goalAmount - totalSaved) / savingsMonthly);
-      etaLine = monthsNeeded <= 0 ? '🎉 Goal reached!' : `~${monthsNeeded} more months at $${savingsMonthly.toFixed(0)}/mo`;
+      etaLine = monthsNeeded <= 0 ? '🎉 Goal reached!' : `~${monthsNeeded} more months at ${formatCurrency(savingsMonthly, settings.currency)}/mo`;
     }
   }
 
@@ -120,28 +133,37 @@ function GoalProgressCard({ settings }: { settings: UserSettings }) {
         {/* Amount row */}
         <div className="flex items-baseline gap-2 mb-3">
           <span className="text-3xl font-black text-slate-800 tabular-nums">
-            ${(hasGoals ? totalSaved : weeklyRollover).toFixed(2)}
+            {formatCurrency(hasGoals ? totalSaved : weeklyRollover, settings.currency)}
           </span>
           {hasGoals && goalAmount > 0 && (
-            <span className="text-sm text-slate-400 font-medium">of ${goalAmount.toLocaleString()}</span>
+            <span className="text-sm text-slate-400 font-medium">of {formatCurrency(goalAmount, settings.currency)}</span>
           )}
         </div>
 
-        {/* Progress bar */}
+        {/* Progress bar or Celebration */}
         {hasGoals && goalAmount > 0 && (
           <div className="mb-3">
-            <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
-              <motion.div
-                className="h-full rounded-full bg-gradient-to-r from-orange-400 to-pink-400"
-                initial={{ width: 0 }}
-                animate={{ width: `${progressPct}%` }}
-                transition={{ type: 'spring', damping: 22, stiffness: 80, delay: 0.2 }}
-              />
-            </div>
-            <div className="flex justify-between mt-1.5">
-              <span className="text-[11px] text-slate-400">{progressPct.toFixed(0)}% there</span>
-              <span className="text-[11px] text-slate-400">${Math.max(0, goalAmount - totalSaved).toFixed(0)} to go</span>
-            </div>
+            {totalSaved >= goalAmount ? (
+              <div className="bg-gradient-to-r from-orange-400 to-pink-500 rounded-xl p-3 text-center text-white shadow-sm mt-1">
+                <p className="font-black text-lg">Goal Reached! 🎉</p>
+                <p className="text-xs font-semibold opacity-90 block mt-0.5">You successfully saved {formatCurrency(goalAmount, settings.currency)}</p>
+              </div>
+            ) : (
+              <>
+                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full rounded-full bg-gradient-to-r from-orange-400 to-pink-400"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${progressPct}%` }}
+                    transition={{ type: 'spring', damping: 22, stiffness: 80, delay: 0.2 }}
+                  />
+                </div>
+                <div className="flex justify-between mt-1.5">
+                  <span className="text-[11px] text-slate-400">{progressPct.toFixed(0)}% there</span>
+                  <span className="text-[11px] text-slate-400">{formatCurrency(Math.max(0, goalAmount - totalSaved), settings.currency)} to go</span>
+                </div>
+              </>
+            )}
           </div>
         )}
 
@@ -155,7 +177,7 @@ function GoalProgressCard({ settings }: { settings: UserSettings }) {
             >
               <TrendingUp className="w-4 h-4 text-emerald-500 flex-shrink-0" />
               <div>
-                <p className="text-xs font-bold text-emerald-700">+${weeklyRollover.toFixed(2)} rolled in this week! 🐶</p>
+                <p className="text-xs font-bold text-emerald-700">+{formatCurrency(weeklyRollover, settings.currency)} rolled in this week! 🐶</p>
                 <p className="text-[10px] text-emerald-600">
                   {hasGoals ? 'Daily savings stacked toward your goal' : 'You spent under budget — these are yours to keep!'}
                 </p>
@@ -177,9 +199,10 @@ interface BottomSheetProps {
   total: number;
   pct: string;
   transactions: Transaction[];
+  currency: string;
   onClose: () => void;
 }
-function CategoryBottomSheet({ category, color, total, pct, transactions, onClose }: BottomSheetProps) {
+function CategoryBottomSheet({ category, color, total, pct, transactions, currency, onClose }: BottomSheetProps) {
   const Icon = CATEGORY_ICONS[category] || Info;
   const emoji = CATEGORY_EMOJIS[category] || '📦';
 
@@ -199,6 +222,14 @@ function CategoryBottomSheet({ category, color, total, pct, transactions, onClos
         animate={{ y: 0 }}
         exit={{ y: '100%' }}
         transition={{ type: 'spring', damping: 30, stiffness: 300 }}
+        drag="y"
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={0.4}
+        onDragEnd={(e, info) => {
+          if (info.offset.y > 100 || info.velocity.y > 500) {
+            onClose();
+          }
+        }}
       >
         {/* drag handle */}
         <div className="flex justify-center pt-3 pb-1">
@@ -217,7 +248,7 @@ function CategoryBottomSheet({ category, color, total, pct, transactions, onClos
             </div>
           </div>
           <div className="text-right">
-            <p className="font-black text-slate-800 text-xl tabular-nums">${total.toFixed(2)}</p>
+            <p className="font-black text-slate-800 text-xl tabular-nums">{formatCurrency(total, currency)}</p>
             <button onClick={onClose} className="text-slate-300 hover:text-slate-500">
               <X className="w-5 h-5 mt-1" />
             </button>
@@ -235,8 +266,8 @@ function CategoryBottomSheet({ category, color, total, pct, transactions, onClos
                 <p className="text-sm font-semibold text-slate-700">{t.description || category}</p>
                 <p className="text-xs text-slate-400">{format(new Date(t.date), 'EEE, d MMM · h:mm a')}</p>
               </div>
-              <p className="font-bold text-slate-600 tabular-nums text-sm">
-                ${(t.amount / t.splitBy).toFixed(2)}
+              <p className={`font-bold tabular-nums text-sm ${t.isIncome ? 'text-emerald-500' : 'text-slate-600'}`}>
+                {t.isIncome ? '+' : ''}{formatCurrency(t.amount / t.splitBy, currency)}
               </p>
             </div>
           ))}
@@ -247,11 +278,18 @@ function CategoryBottomSheet({ category, color, total, pct, transactions, onClos
 }
 
 // ── Main Tab ──────────────────────────────────────────────────────────────────
-export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings }) => {
+export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings, onUpdateSettings }) => {
   const availableMonths = getAvailableMonths(transactions);
   const [selectedMonthIdx, setSelectedMonthIdx] = useState(0);
   const [activeSlice, setActiveSlice] = useState<number | null>(null);
   const [sheetCategory, setSheetCategory] = useState<string | null>(null);
+
+  // Check for newly completed goals to celebrate globally!
+  const celebratingGoal = settings.savingsGoals?.find(g => 
+    g.amount > 0 && 
+    g.savedSoFar >= g.amount && 
+    !(settings.goalsCelebrated || []).includes(g.id)
+  );
 
   const selectedMonth = availableMonths[selectedMonthIdx] ?? startOfMonth(new Date());
   const monthEnd = endOfMonth(selectedMonth);
@@ -285,7 +323,37 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
     : null;
 
   return (
-    <div className="flex flex-col bg-slate-50 min-h-full relative">
+    <div className="flex flex-col bg-slate-50 min-h-full relative overflow-hidden">
+      
+      {/* Full-Screen One-Time Celebration Modal */}
+      <AnimatePresence>
+        {celebratingGoal && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-md flex flex-col items-center justify-center p-6 text-center"
+          >
+            <motion.div initial={{ scale: 0.8, y: 20 }} animate={{ scale: 1, y: 0 }} transition={{ type: 'spring', damping: 15 }} className="bg-white rounded-3xl p-8 max-w-sm w-full shadow-2xl relative overflow-hidden">
+              <div className="absolute top-0 left-0 right-0 h-2 bg-gradient-to-r from-orange-400 via-pink-500 to-purple-500" />
+              <div className="w-20 h-20 mx-auto bg-gradient-to-tr from-orange-100 to-pink-100 rounded-full flex items-center justify-center text-4xl mb-6 shadow-inner">
+                🎉
+              </div>
+              <h2 className="text-2xl font-black text-slate-800 mb-2">Goal Reached!</h2>
+              <p className="text-sm text-slate-500 mb-8 leading-relaxed font-medium">
+                You successfully saved <strong className="text-slate-800">{formatCurrency(celebratingGoal.amount, settings.currency)}</strong> for your <strong className="text-orange-600">{celebratingGoal.name || 'goal'}</strong>. Incredible effort!
+              </p>
+              <button 
+                onClick={() => {
+                  onUpdateSettings({ goalsCelebrated: [...(settings.goalsCelebrated || []), celebratingGoal.id] });
+                }} 
+                className="w-full py-4 rounded-xl font-bold text-white bg-slate-800 hover:bg-slate-700 shadow-md transition-all active:scale-95"
+              >
+                Awesome!
+              </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <header className="px-6 pt-6 pb-4 bg-white shadow-sm sticky top-0 z-10">
         <h1 className="font-black text-xl text-slate-800">Insights</h1>
         <p className="text-xs text-slate-400 mt-0.5">Your spending breakdown & savings progress</p>
@@ -294,6 +362,12 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
       <div className="px-4 py-5 space-y-5">
         {/* ── Savings Goal Card ── */}
         <GoalProgressCard settings={settings} />
+
+        {/* ── Visual Divider ── */}
+        <div className="-mx-4 h-4 bg-slate-100 border-y border-slate-200" />
+        
+        {/* MONTHLY SPENDING Header */}
+        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest px-1">Monthly Spending</h2>
 
         {/* Month Selector */}
         {availableMonths.length > 1 && (
@@ -333,8 +407,8 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
                 />
               </div>
               <div className="flex justify-between mt-2 text-xs text-slate-400">
-                <span>${totalSpent.toFixed(2)} spent</span>
-                <span>${spendBudget.toFixed(2)} budget</span>
+                <span>{formatCurrency(totalSpent, settings.currency)} spent</span>
+                <span>{formatCurrency(spendBudget, settings.currency)} budget</span>
               </div>
             </div>
 
@@ -369,13 +443,13 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
                 <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
                   {activeItem ? (
                     <>
-                      <p className="text-xl font-black text-slate-800">${activeItem.value.toFixed(2)}</p>
+                      <p className="text-xl font-black text-slate-800 tabular-nums">{formatCurrency(activeItem.value, settings.currency)}</p>
                       <p className="text-xs text-slate-400">{activeItem.name}</p>
                       <p className="text-xs font-bold text-orange-500">{((activeItem.value / totalSpent) * 100).toFixed(1)}%</p>
                     </>
                   ) : (
                     <>
-                      <p className="text-2xl font-black text-slate-800">${totalSpent.toFixed(2)}</p>
+                      <p className="text-2xl font-black text-slate-800 tabular-nums">{formatCurrency(totalSpent, settings.currency)}</p>
                       <p className="text-xs text-slate-400">Total spent</p>
                     </>
                   )}
@@ -407,7 +481,7 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
                     </div>
                     <div className="flex items-center gap-3">
                       <div className="text-right">
-                        <p className={`font-bold text-sm tabular-nums ${isActive ? 'text-white' : 'text-slate-600'}`}>${item.value.toFixed(2)}</p>
+                        <p className={`font-bold text-sm tabular-nums ${isActive ? 'text-white' : 'text-slate-600'}`}>{formatCurrency(item.value, settings.currency)}</p>
                         <p className={`text-xs ${isActive ? 'text-slate-300' : 'text-slate-400'}`}>{pct}%</p>
                       </div>
                       <ChevronRight className={`w-4 h-4 ${isActive ? 'text-slate-400' : 'text-slate-300'}`} />
@@ -435,6 +509,7 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
             total={categoryData[sheetData.cat] ?? 0}
             pct={((categoryData[sheetData.cat] / totalSpent) * 100).toFixed(1)}
             transactions={sheetData.items}
+            currency={settings.currency}
             onClose={closeSheet}
           />
         )}

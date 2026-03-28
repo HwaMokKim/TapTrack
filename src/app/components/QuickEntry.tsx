@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Check, ChevronDown, Search, Plus, Users, FileText } from 'lucide-react';
-import { Transaction, FIXED_CATEGORIES } from '../types';
+import { Transaction, FIXED_CATEGORIES, getCurrencySymbol } from '../types';
 
 interface QuickEntryProps {
   isOpen: boolean;
   onClose: () => void;
   onSave: (entry: Omit<Transaction, 'id' | 'date'>) => void;
+  currency: string;
 }
 
 interface Category {
@@ -48,7 +49,7 @@ function setLastCategory(cat: string) {
   localStorage.setItem('taptrack_last_category', cat);
 }
 
-export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave }) => {
+export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave, currency }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [amountStr, setAmountStr] = useState('0');
   const [categories, setCategories] = useState<Category[]>(loadCategories);
@@ -59,6 +60,8 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave 
   const [catSearch, setCatSearch] = useState('');
   const [newCatLabel, setNewCatLabel] = useState('');
   const [showAddCat, setShowAddCat] = useState(false);
+  const [isIncome, setIsIncome] = useState(false);
+  const [incomeAllocation, setIncomeAllocation] = useState<'Spending' | 'Savings' | 'Investment'>('Spending');
   const searchRef = useRef<HTMLInputElement>(null);
 
   // Reset overlay state each time it opens
@@ -72,6 +75,8 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave 
       setCatSearch('');
       setNewCatLabel('');
       setShowAddCat(false);
+      setIsIncome(false);
+      setIncomeAllocation('Spending');
       setCategory(getLastCategory()); // Always resume with last-used category
     }
   }, [isOpen]);
@@ -94,11 +99,23 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave 
     }
   };
 
+  // Format amountStr with commas for display (keep raw for calculation)
+  const displayAmount = (() => {
+    if (amountStr.includes('.')) {
+      const [whole, dec] = amountStr.split('.');
+      const wholeNum = parseInt(whole.replace(/,/g, '')) || 0;
+      return `${wholeNum.toLocaleString('en-US')}.${dec}`;
+    }
+    const num = parseInt(amountStr) || 0;
+    return num.toLocaleString('en-US');
+  })();
+
   const handleSave = () => {
     const amount = parseFloat(amountStr);
     if (amount <= 0) return;
-    setLastCategory(category);
-    onSave({ amount, category, splitBy, description });
+    if (!isIncome) setLastCategory(category);
+    const cat = isIncome ? `Income:${incomeAllocation}` : category;
+    onSave({ amount, category: cat, splitBy, description, isIncome });
     onClose();
   };
 
@@ -140,7 +157,26 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave 
           <button onClick={onClose} className="p-2 -ml-2 rounded-full hover:bg-slate-100 text-slate-400">
             <X className="w-5 h-5" />
           </button>
-          <span className="font-bold text-slate-600 text-sm">New Log</span>
+          
+          <div className="flex bg-slate-100/80 rounded-lg p-1 shadow-inner">
+            <button
+              onClick={() => setIsIncome(false)}
+              className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${
+                !isIncome ? 'bg-white shadow text-slate-800 scale-100' : 'text-slate-400 scale-95 hover:text-slate-600'
+              }`}
+            >
+              Expense
+            </button>
+            <button
+              onClick={() => setIsIncome(true)}
+              className={`px-4 py-1.5 rounded-md text-xs font-bold transition-all ${
+                isIncome ? 'bg-emerald-500 shadow-sm text-white scale-100' : 'text-slate-400 scale-95 hover:text-emerald-600'
+              }`}
+            >
+              Income
+            </button>
+          </div>
+
           <div className="w-9" />
         </header>
 
@@ -151,26 +187,48 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave 
 
             {/* ── Category + Amount Row ── */}
             <div className="flex items-center justify-between px-5 pb-3 flex-shrink-0">
-              <button
-                onClick={() => setShowCategoryPicker(true)}
-                className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 transition-colors ${
-                  isFixed ? 'bg-violet-100' : 'bg-slate-100 hover:bg-slate-200'
-                }`}
-              >
-                <span className="text-xl">{currentCat.emoji}</span>
-                <span className={`font-bold text-sm ${isFixed ? 'text-violet-700' : 'text-slate-800'}`}>
-                  {currentCat.label}
-                </span>
-                {isFixed && (
-                  <span className="text-[10px] font-bold text-violet-500 bg-violet-200 px-1.5 py-0.5 rounded-full">FIXED</span>
-                )}
-                <ChevronDown className={`w-4 h-4 ${isFixed ? 'text-violet-400' : 'text-slate-400'}`} />
-              </button>
+              {!isIncome ? (
+                <button
+                  onClick={() => setShowCategoryPicker(true)}
+                  className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 transition-colors ${
+                    isFixed ? 'bg-violet-100' : 'bg-slate-100 hover:bg-slate-200'
+                  }`}
+                >
+                  <span className="text-xl">{currentCat.emoji}</span>
+                  <span className={`font-bold text-sm ${isFixed ? 'text-violet-700' : 'text-slate-800'}`}>
+                    {currentCat.label}
+                  </span>
+                  {isFixed && (
+                    <span className="text-[10px] font-bold text-violet-500 bg-violet-200 px-1.5 py-0.5 rounded-full">FIXED</span>
+                  )}
+                  <ChevronDown className={`w-4 h-4 ${isFixed ? 'text-violet-400' : 'text-slate-400'}`} />
+                </button>
+              ) : (
+                <div className="flex items-center gap-1.5">
+                  {(['Spending', 'Savings', 'Investment'] as const).map(bucket => (
+                    <button
+                      key={bucket}
+                      onClick={() => setIncomeAllocation(bucket)}
+                      className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${
+                        incomeAllocation === bucket
+                          ? 'bg-emerald-500 text-white shadow-sm scale-105'
+                          : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {bucket === 'Spending' ? '💳' : bucket === 'Savings' ? '🏦' : '📈'} {bucket}
+                    </button>
+                  ))}
+                </div>
+              )}
 
               <div className="flex items-baseline gap-1">
-                <span className="text-slate-400 text-lg font-semibold">$</span>
-                <span className="text-5xl font-black text-slate-800 tabular-nums tracking-tighter leading-none">
-                  {amountStr}
+                <span className={`text-lg font-semibold ${isIncome ? 'text-emerald-400' : 'text-slate-400'}`}>{getCurrencySymbol(currency)}</span>
+                <span className={`font-black tabular-nums tracking-tighter leading-none ${
+                  isIncome ? 'text-emerald-500' : 'text-slate-800'
+                } ${
+                  displayAmount.length > 10 ? 'text-3xl' : displayAmount.length > 7 ? 'text-4xl' : 'text-5xl'
+                }`}>
+                  {displayAmount}
                 </span>
               </div>
             </div>
@@ -181,9 +239,11 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave 
                 {[1, 2, 3, 4, 5, 6, 7, 8, 9, '.', 0, 'DEL'].map(btn => (
                   <motion.button
                     key={btn}
-                    whileTap={{ scale: 0.9, backgroundColor: '#e2e8f0' }}
+                    whileTap={{ scale: 0.9, backgroundColor: isIncome ? '#d1fae5' : '#e2e8f0' }}
                     onClick={() => handleNumpad(btn.toString())}
-                    className="h-14 text-2xl font-bold bg-slate-50 text-slate-800 rounded-2xl transition-colors select-none flex items-center justify-center active:bg-slate-200"
+                    className={`h-14 text-2xl font-bold bg-slate-50 rounded-2xl transition-colors select-none flex items-center justify-center ${
+                      isIncome ? 'text-emerald-700 active:bg-emerald-100' : 'text-slate-800 active:bg-slate-200'
+                    }`}
                   >
                     {btn === 'DEL' ? '⌫' : btn}
                   </motion.button>
@@ -204,9 +264,11 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave 
                 whileTap={{ scale: 0.97 }}
                 onClick={handleSave}
                 disabled={parseFloat(amountStr) === 0}
-                className="flex-1 bg-slate-900 disabled:bg-slate-300 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2"
+                className={`flex-1 text-white font-bold py-4 rounded-2xl shadow-xl flex items-center justify-center gap-2 ${
+                  isIncome ? 'bg-emerald-500 disabled:bg-emerald-300' : 'bg-slate-900 disabled:bg-slate-300'
+                }`}
               >
-                Save <Check className="w-4 h-4" />
+                {isIncome ? 'Receive' : 'Save'} <Check className="w-4 h-4" />
               </motion.button>
             </div>
           </>
@@ -220,7 +282,7 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave 
           >
             <div className="text-center py-5">
               <p className="text-base font-bold text-slate-400">
-                Total: <span className="text-slate-800 text-2xl font-black">${amountStr}</span>
+                Total: <span className="text-slate-800 text-2xl font-black">{getCurrencySymbol(currency)}{parseInt(amountStr).toLocaleString('en-US')}{amountStr.includes('.') ? '.' + amountStr.split('.')[1] : ''}</span>
               </p>
               {isFixed && (
                 <p className="text-xs text-violet-500 font-semibold mt-1">

@@ -1,7 +1,7 @@
 import React from 'react';
 import { motion } from 'motion/react';
 import { X, Sparkles, TrendingUp } from 'lucide-react';
-import { UserSettings } from '../types';
+import { UserSettings, formatCurrency } from '../types';
 
 interface SavingsMilestoneProps {
   settings: UserSettings;
@@ -14,9 +14,20 @@ export const SavingsMilestone: React.FC<SavingsMilestoneProps> = ({
   settings, type, rolloverAmount, onClose
 }) => {
   const savings = settings.income * settings.savingsRatio;
-  const goalName = settings.savingsGoalName;
-  const goalAmount = settings.savingsGoalAmount;
   const isWeekly = type === 'weekly';
+
+  let goalName = settings.savingsGoalName;
+  let goalAmount = settings.savingsGoalAmount;
+  let totalSaved = settings.totalSaved;
+
+  if (settings.savingsGoals && settings.savingsGoals.length > 0) {
+    const activeGoal = settings.priorityGoalId 
+      ? settings.savingsGoals.find(g => g.id === settings.priorityGoalId) || settings.savingsGoals[0]
+      : settings.savingsGoals[0];
+    goalName = activeGoal.name;
+    goalAmount = activeGoal.amount;
+    totalSaved = activeGoal.savedSoFar;
+  }
 
   return (
     <motion.div
@@ -74,28 +85,28 @@ export const SavingsMilestone: React.FC<SavingsMilestoneProps> = ({
             {isWeekly ? (
               <>
                 <h2 className="text-2xl font-black text-slate-800">
-                  You rolled over ${rolloverAmount.toFixed(2)}!
+                  You rolled over {formatCurrency(rolloverAmount, settings.currency)}!
                 </h2>
                 <p className="text-slate-500 text-sm leading-relaxed max-w-xs">
-                  You spent <strong>less</strong> than your daily budget this week. That $
-                  {rolloverAmount.toFixed(2)} is now stacked into your savings rollover! 🏦
+                  You spent <strong>less</strong> than your daily budget this week. That{' '}
+                  {formatCurrency(rolloverAmount, settings.currency)} is now stacked into your savings rollover! 🏦
                 </p>
               </>
             ) : (
               <>
                 <h2 className="text-2xl font-black text-slate-800">
-                  ${savings.toFixed(0)} Saved This Month! 🎉
+                  {formatCurrency(savings, settings.currency)} Saved This Month! 🎉
                 </h2>
                 <p className="text-slate-500 text-sm leading-relaxed max-w-xs">
                   Your 20% savings just arrived. Plus your weekly rollovers added an extra{' '}
-                  <strong className="text-orange-600">${rolloverAmount.toFixed(2)}</strong>!
+                  <strong className="text-orange-600">{formatCurrency(rolloverAmount, settings.currency)}</strong>!
                 </p>
 
                 {/* Running total */}
                 <div className="mt-1 flex items-center justify-center gap-2">
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
                   <span className="text-sm font-bold text-emerald-600">
-                    Total saved to date: ${(settings.totalSaved).toFixed(2)}
+                    Total saved to date: {formatCurrency(totalSaved, settings.currency)}
                   </span>
                 </div>
               </>
@@ -115,7 +126,7 @@ export const SavingsMilestone: React.FC<SavingsMilestoneProps> = ({
               <p className="text-sm text-slate-500 mt-1">
                 Only{' '}
                 <strong className="text-orange-600">
-                  {Math.max(0, Math.ceil((goalAmount - settings.totalSaved) / savings))} more months
+                  {Math.max(0, Math.ceil((goalAmount - totalSaved) / savings))} more months
                 </strong>{' '}
                 to go!
               </p>
@@ -123,12 +134,12 @@ export const SavingsMilestone: React.FC<SavingsMilestoneProps> = ({
                 <motion.div
                   className="h-full bg-orange-400 rounded-full"
                   initial={{ width: 0 }}
-                  animate={{ width: `${Math.min(100, (settings.totalSaved / goalAmount) * 100)}%` }}
+                  animate={{ width: `${Math.min(100, (totalSaved / goalAmount) * 100)}%` }}
                   transition={{ delay: 0.9, type: 'spring', damping: 22 }}
                 />
               </div>
               <p className="text-xs text-slate-400 mt-1 text-right">
-                ${Math.min(settings.totalSaved, goalAmount).toFixed(0)} / ${goalAmount.toFixed(0)}
+                {formatCurrency(Math.min(totalSaved, goalAmount), settings.currency)} / {formatCurrency(goalAmount, settings.currency)}
               </p>
             </motion.div>
           )}

@@ -8,7 +8,7 @@ import { SettingsTab } from './components/SettingsTab';
 import { QuickEntry } from './components/QuickEntry';
 import { TransactionModal } from './components/TransactionModal';
 import { SavingsMilestone } from './components/SavingsMilestone';
-import { Transaction, UserSettings, FIXED_CATEGORIES } from './types';
+import { Transaction, UserSettings, SavingsGoal, FixedBill, FIXED_CATEGORIES } from './types';
 import { LayoutDashboard, History, PieChart, Settings } from 'lucide-react';
 import {
   startOfMonth, endOfMonth, startOfWeek, endOfWeek,
@@ -43,7 +43,47 @@ const DEFAULT_SETTINGS: UserSettings = {
   weeklyRollover: 0,
   lastWeeklyReset: null,
   totalSaved: 0,
+  currency: 'USD',
+  priorityGoalId: null,
+  goalsCelebrated: [],
+  fixedBills: [],
 };
+
+export function distributeSavings(pool: number, goals: SavingsGoal[], priorityId: string | null): SavingsGoal[] {
+  let remainingPool = pool;
+  const newGoals = goals.map(g => ({ ...g }));
+
+  if (priorityId) {
+    const pGoal = newGoals.find(g => g.id === priorityId);
+    if (pGoal) {
+      const needed = Math.max(0, pGoal.amount - pGoal.savedSoFar);
+      const applied = Math.min(remainingPool, needed > 0 ? needed : remainingPool);
+      const actualApplied = pGoal.amount > 0 ? applied : remainingPool;
+      pGoal.savedSoFar += actualApplied;
+      remainingPool -= actualApplied;
+    }
+  }
+
+  if (remainingPool > 0) {
+    const sorted = [...newGoals].sort((a,b) => {
+      if (!a.targetDate) return 1;
+      if (!b.targetDate) return -1;
+      return new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime();
+    });
+    for (let g of sorted) {
+      if (remainingPool <= 0) break;
+      const needed = Math.max(0, g.amount - g.savedSoFar);
+      if (g.amount > 0 && needed === 0) continue; // Goal is full
+      const applied = g.amount > 0 ? Math.min(remainingPool, needed) : remainingPool;
+      g.savedSoFar += applied;
+      remainingPool -= applied;
+      
+      const orig = newGoals.find(x => x.id === g.id);
+      if (orig) orig.savedSoFar = g.savedSoFar;
+    }
+  }
+  return newGoals;
+}
 
 /** Calculates today's safe-to-spend limit, properly separating fixed bills from daily budget */
 export function calcDailyBudget(transactions: Transaction[], settings: UserSettings): {
@@ -57,20 +97,29 @@ export function calcDailyBudget(transactions: Transaction[], settings: UserSetti
   const now = new Date();
   const monthStart = startOfMonth(now);
   const monthEnd = endOfMonth(now);
-
   const thisMon = transactions.filter(t =>
     isWithinInterval(new Date(t.date), { start: monthStart, end: monthEnd })
   );
 
   // Fixed bills come out of the monthly pool but NOT from daily allowance
   const monthlyFixed = thisMon
-    .filter(t => FIXED_CATEGORIES.has(t.category) || t.isFixed)
+    .filter(t => (FIXED_CATEGORIES.has(t.category) || t.isFixed) && !t.isIncome)
     .reduce((s, t) => s + t.amount / t.splitBy, 0);
 
-  const monthlyPool = settings.income * settings.needsRatio;
+  // Income adds to the monthly pool
+  const monthlyIncomeLogs = thisMon
+    .filter(t => t.isIncome)
+    .reduce((s, t) => s + t.amount / t.splitBy, 0);
+
+  // Pre-set fixed bills (from Settings) are deducted from Day 1
+  const presetBillsTotal = (settings.fixedBills ?? []).reduce((s, b) => s + b.preset, 0);
+
+  const monthlyPool = settings.income * settings.needsRatio + monthlyIncomeLogs;
   const daysInMonth = monthEnd.getDate();
   const daysLeft = Math.max(1, daysInMonth - now.getDate() + 1);
-  const remainingPool = Math.max(0, monthlyPool - monthlyFixed);
+  // Subtract both logged fixed bills AND preset fixed bills (avoid double-counting logged ones)
+  const totalFixed = Math.max(monthlyFixed, presetBillsTotal);
+  const remainingPool = Math.max(0, monthlyPool - totalFixed);
   const dailyLimit = remainingPool / daysLeft;
 
   // Only daily (non-fixed) spending affects the daily counter
@@ -79,12 +128,13 @@ export function calcDailyBudget(transactions: Transaction[], settings: UserSetti
       const d = new Date(t.date);
       return d.toDateString() === now.toDateString() &&
              !FIXED_CATEGORIES.has(t.category) &&
-             !t.isFixed;
+             !t.isFixed &&
+             !t.isIncome;
     })
     .reduce((s, t) => s + t.amount / t.splitBy, 0);
 
   const monthlySpent = thisMon
-    .filter(t => !FIXED_CATEGORIES.has(t.category) && !t.isFixed)
+    .filter(t => !FIXED_CATEGORIES.has(t.category) && !t.isFixed && !t.isIncome)
     .reduce((s, t) => s + t.amount / t.splitBy, 0);
 
   return { dailyLimit, spentToday, monthlyPool, monthlyFixed, monthlySpent, daysLeftInMonth: daysLeft };
@@ -171,7 +221,16 @@ export default function App() {
         setMilestoneType('monthly');
         setMilestoneRollover(settings.weeklyRollover);
         setShowMilestone(true);
-        setSettings(prev => ({ ...prev, totalSaved: prev.totalSaved + savings, weeklyRollover: 0 }));
+        setSettings(prev => {
+          const totalToDistribute = savings + prev.weeklyRollover;
+          const updatedGoals = distributeSavings(totalToDistribute, prev.savingsGoals, prev.priorityGoalId);
+          return { 
+            ...prev, 
+            totalSaved: prev.totalSaved + savings, 
+            weeklyRollover: 0,
+            savingsGoals: updatedGoals 
+          };
+        });
         localStorage.setItem('taptrack_last_celebration', thisMonthKey);
       }, 800);
     }
@@ -203,7 +262,16 @@ export default function App() {
           setMilestoneType('weekly');
           setMilestoneRollover(rollover);
           setShowMilestone(true);
-          setSettings(prev => ({ ...prev, weeklyRollover: prev.weeklyRollover + rollover, lastWeeklyReset: weekKey }));
+          setSettings(prev => {
+            // Actively distribute the weekly rollover into the goals
+            const updatedGoals = distributeSavings(rollover, prev.savingsGoals, prev.priorityGoalId);
+            return { 
+              ...prev, 
+              weeklyRollover: prev.weeklyRollover + rollover, 
+              lastWeeklyReset: weekKey,
+              savingsGoals: updatedGoals
+            };
+          });
         }, 1200);
       } else {
         setSettings(prev => ({ ...prev, lastWeeklyReset: weekKey }));
@@ -231,7 +299,16 @@ export default function App() {
         newStreak = diffDays === 1 ? newStreak + 1 : 1;
       }
     }
-    setSettings(prev => ({ ...prev, streakCount: newStreak, lastLogDate: todayStr }));
+    setSettings(prev => {
+      // Auto-stamp completedAt for goals newly crossing the threshold
+      const updatedGoals = (prev.savingsGoals ?? []).map(g => {
+        if (g.amount > 0 && g.savedSoFar >= g.amount && !g.completedAt) {
+          return { ...g, completedAt: now.toISOString() };
+        }
+        return g;
+      });
+      return { ...prev, streakCount: newStreak, lastLogDate: todayStr, savingsGoals: updatedGoals };
+    });
     const newTransaction: Transaction = {
       ...entry,
       id: Math.random().toString(36).substr(2, 9),
@@ -310,6 +387,7 @@ export default function App() {
               {activeTab === 'history' && (
                 <HistoryTab
                   transactions={transactions}
+                  settings={settings}
                   onSelectTransaction={setSelectedTransaction}
                 />
               )}
@@ -318,6 +396,7 @@ export default function App() {
                   transactions={transactions}
                   settings={settings}
                   budgetInfo={budgetInfo}
+                  onUpdateSettings={(s) => setSettings(prev => ({ ...prev, ...s }))}
                 />
               )}
               {activeTab === 'settings' && (
@@ -368,6 +447,7 @@ export default function App() {
           isOpen={isQuickEntryOpen}
           onClose={() => setIsQuickEntryOpen(false)}
           onSave={handleSaveEntry}
+          currency={settings.currency}
         />
 
         {/* Transaction Modal */}
