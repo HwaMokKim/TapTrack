@@ -118,8 +118,189 @@ function GoalDatePicker({ value, onChange }: {
   );
 }
 
-// ── Hybrid Slider + Tappable % Input ─────────────────────────────────────────────
+// ── Hybrid Slider + Tappable % Input ─────────────────────────────────────────────────────────────────────
+/**
+ * Rolling-Lock Algorithm
+ * prevField  = the slider you LAST touched (locks in while you drag a DIFFERENT one)
+ * active     = the slider being dragged now (always free)
+ * sponge     = the 3rd slider (auto-adjusts to keep total == 100)
+ * Hard-clamp: active <= 100 - prevField.value so sponge never goes below 0.
+ * First drag: no lock yet, both others adjust proportionally.
+ */
 function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
+  settings: UserSettings;
+  onUpdateSettings: (s: Partial<UserSettings>) => void;
+  setHasError: (err: boolean) => void;
+}) {
+  const [localNeeds,   setLocalNeeds]   = useState(Math.round(settings.needsRatio * 100));
+  const [localSavings, setLocalSavings] = useState(Math.round(settings.savingsRatio * 100));
+  const [localInvest,  setLocalInvest]  = useState(Math.round(settings.investmentsRatio * 100));
+  const [editingField, setEditingField] = useState<'needs' | 'savings' | 'invest' | null>(null);
+  const [editingVal,   setEditingVal]   = useState('');
+  const editRef = useRef<HTMLInputElement>(null);
+
+  // prevField = last slider the user touched — becomes the "locked" one next drag
+  const [prevField, setPrevField] = useState<'needs' | 'savings' | 'invest' | null>(null);
+
+  // Hold 200ms to enter precision mode (step 1% instead of 5%)
+  const [precisionField, setPrecisionField] = useState<'needs' | 'savings' | 'invest' | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Single-fire vibration (for typed-input overflow only; slider is hard-clamped)
+  const hasVibratedRef = useRef(false);
+
+  const ALL: Array<'needs' | 'savings' | 'invest'> = ['needs', 'savings', 'invest'];
+  const sum = localNeeds + localSavings + localInvest;
+  const hasError = sum !== 100;
+
+  /**
+   * Core rolling-lock update:
+   *   field  = slider being moved
+   *   rawVal = value the browser reported
+   *   locked = prevField if it differs from field, otherwise null
+   */
+  const applyUpdate = (
+    field: 'needs' | 'savings' | 'invest',
+    rawVal: number,
+    locked: 'needs' | 'savings' | 'invest' | null,
+    cur: Record<string, number>
+  ): Record<string, number> => {
+    const others = ALL.filter(f => f !== field);
+
+    if (locked !== null) {
+      // Hard-clamp so sponge never goes < 0
+      const maxVal = Math.max(0, 100 - cur[locked]);
+      const val = Math.min(rawVal, maxVal);
+      const sponge = others.find(f => f !== locked)!;
+      return { ...cur, [field]: val, [sponge]: Math.max(0, 100 - val - cur[locked]) };
+    }
+
+    // No lock yet (first drag): distribute remainder among the other two proportionally
+    const val = rawVal;
+    const remaining = Math.max(0, 100 - val);
+    const othersSum = others.reduce((s, f) => s + cur[f], 0);
+    const next: Record<string, number> = { ...cur, [field]: val };
+    if (othersSum === 0) {
+      next[others[0]] = Math.floor(remaining / 2);
+      next[others[1]] = remaining - next[others[0]];
+    } else {
+      const s0 = Math.round(cur[others[0]] / othersSum * remaining);
+      next[others[0]] = Math.max(0, s0);
+      next[others[1]] = Math.max(0, remaining - s0);
+    }
+    return next;
+  };
+
+  const handleSlider = (field: 'needs' | 'savings' | 'invest', rawVal: number) => {
+    const locked = prevField !== null && prevField !== field ? prevField : null;
+    const cur = { needs: localNeeds, savings: localSavings, invest: localInvest };
+    const next = applyUpdate(field, rawVal, locked, cur);
+    setLocalNeeds(next.needs); setLocalSavings(next.savings); setLocalInvest(next.invest);
+    setPrevField(field);
+  };
+
+  useEffect(() => {
+    if (sum > 100 && !hasVibratedRef.current) {
+      hasVibratedRef.current = true;
+      if ('vibrate' in navigator) navigator.vibrate(80);
+    } else if (sum <= 100) { hasVibratedRef.current = false; }
+  }, [sum]);
+
+  useEffect(() => {
+    const err = sum !== 100;
+    setHasError(err);
+    if (!err) onUpdateSettings({ needsRatio: localNeeds / 100, savingsRatio: localSavings / 100, investmentsRatio: localInvest / 100 });
+  }, [localNeeds, localSavings, localInvest]);
+
+  const startEdit = (field: 'needs' | 'savings' | 'invest', current: number) => {
+    setEditingField(field); setEditingVal(current.toString());
+    setTimeout(() => editRef.current?.select(), 80);
+  };
+
+  const commitEdit = () => {
+    if (!editingField) return;
+    const val = Math.min(100, Math.max(0, parseInt(editingVal) || 0));
+    const locked = prevField !== null && prevField !== editingField ? prevField : null;
+    const cur = { needs: localNeeds, savings: localSavings, invest: localInvest };
+    const next = applyUpdate(editingField, val, locked, cur);
+    setLocalNeeds(next.needs); setLocalSavings(next.savings); setLocalInvest(next.invest);
+    setPrevField(editingField); setEditingField(null);
+  };
+
+  const rows: { key: 'needs' | 'savings' | 'invest'; label: string; emoji: string; val: number; color: string; accent: string }[] = [
+    { key: 'needs',   label: 'Spending',    emoji: '💳', val: localNeeds,   color: '#f97316', accent: 'accent-orange-500' },
+    { key: 'savings', label: 'Savings',     emoji: '🏦', val: localSavings, color: '#10b981', accent: 'accent-emerald-500' },
+    { key: 'invest',  label: 'Investments', emoji: '📈', val: localInvest,  color: '#8b5cf6', accent: 'accent-violet-500' },
+  ];
+
+  // sponge = the field that is neither prevField (locked) nor currently editing
+  const isSponge = (key: 'needs' | 'savings' | 'invest') =>
+    prevField !== null && key !== prevField && key !== (editingField ?? prevField);
+
+  return (
+    <div className="space-y-5">
+      <p className="text-xs text-slate-400 leading-relaxed">
+        Drag a slider — the previously touched one locks, and the 3rd auto-balances to 100%.
+      </p>
+
+      {rows.map(row => (
+        <div key={row.key}>
+          <div className="flex items-center justify-between mb-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-base flex-shrink-0">{row.emoji}</span>
+              <span className="text-sm font-semibold text-slate-700 flex-shrink-0">{row.label}</span>
+              {/* 'auto' badge always rendered; opacity-toggled to avoid layout shifts */}
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400 flex-shrink-0 transition-opacity ${isSponge(row.key) ? 'opacity-100' : 'opacity-0 pointer-events-none select-none'}`}>auto</span>
+            </div>
+            {editingField === row.key ? (
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <input
+                  ref={editRef} type="number" value={editingVal}
+                  onChange={e => setEditingVal(e.target.value)}
+                  onBlur={commitEdit}
+                  onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
+                  className={`w-14 text-right bg-slate-50 border ${hasError ? 'border-red-300' : 'border-orange-300'} rounded-lg px-2 py-1 text-sm font-black outline-none`}
+                />
+                <span className={`text-sm font-bold ${hasError ? 'text-red-400' : 'text-slate-400'}`}>%</span>
+              </div>
+            ) : (
+              <button onClick={() => startEdit(row.key, row.val)}
+                className={`text-sm font-black px-2 py-0.5 rounded-lg flex-shrink-0 ${hasError ? 'text-red-500 bg-red-50' : 'text-slate-700 hover:bg-orange-50 hover:text-orange-600'} transition-colors`}>
+                {row.val}%
+              </button>
+            )}
+          </div>
+          <div className="relative">
+            <input
+              type="range" min={0} max={100}
+              step={precisionField === row.key ? 1 : 5}
+              value={row.val}
+              onChange={e => handleSlider(row.key, parseInt(e.target.value))}
+              onPointerDown={() => { holdTimerRef.current = setTimeout(() => setPrecisionField(row.key), 200); }}
+              onPointerUp={() => { if (holdTimerRef.current) clearTimeout(holdTimerRef.current); setPrecisionField(null); }}
+              onPointerLeave={() => { if (holdTimerRef.current) clearTimeout(holdTimerRef.current); setPrecisionField(null); }}
+              className={`w-full h-2.5 rounded-full appearance-none cursor-pointer ${row.accent}`}
+              style={{ background: `linear-gradient(to right, ${row.color} ${row.val}%, #f1f5f9 ${row.val}%)` }}
+            />
+            {precisionField === row.key && (
+              <p className="text-[10px] text-slate-400 mt-0.5 text-right font-semibold">❤️‍🔥 Precision — any %</p>
+            )}
+          </div>
+        </div>
+      ))}
+
+      <AnimatePresence>
+        {hasError && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}>
+            <p className="text-xs font-bold text-red-500 bg-red-50 px-3 py-2 rounded-lg flex items-center gap-2">
+              <span className="text-base">⚠️</span> Total is {sum}% — must equal exactly 100%
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}: {
   settings: UserSettings; 
   onUpdateSettings: (s: Partial<UserSettings>) => void;
   setHasError: (err: boolean) => void;
@@ -131,42 +312,99 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
   const [editingVal, setEditingVal] = useState('');
   const editRef = useRef<HTMLInputElement>(null);
 
+  /**
+   * lockQueue: tracks the last 2 fields the user explicitly touched.
+   * The field NOT in lockQueue is the "sponge" that auto-adjusts to 100%.
+   * Queue rotates: oldest entry is dropped when a new field is touched.
+   */
+  const [lockQueue, setLockQueue] = useState<Array<'needs' | 'savings' | 'invest'>>([]);
+
+  // Precision-mode state per slider (hold 200ms → step=1)
+  const [precisionField, setPrecisionField] = useState<'needs' | 'savings' | 'invest' | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Vibration guard: fire once when sum > 100, reset when sum drops back
+  const hasVibratedRef = useRef(false);
+
   const sum = localNeeds + localSavings + localInvest;
   const hasError = sum !== 100;
 
-  // Auto-adjust: when one slider changes, try to auto-fix the others proportionally
-  const handleSlider = (field: 'needs' | 'savings' | 'invest', newVal: number) => {
-    const clamp = (v: number) => Math.max(0, Math.min(100, v));
-    if (field === 'needs') {
-      const diff = newVal - localNeeds;
-      const remaining = 100 - newVal;
-      const otherSum = localSavings + localInvest;
-      if (otherSum > 0) {
-        const s = clamp(Math.round(localSavings / otherSum * remaining));
-        setLocalSavings(s);
-        setLocalInvest(clamp(remaining - s));
-      }
-      setLocalNeeds(newVal);
-    } else if (field === 'savings') {
-      const remaining = 100 - newVal;
-      const otherSum = localNeeds + localInvest;
-      if (otherSum > 0) {
-        const n = clamp(Math.round(localNeeds / otherSum * remaining));
-        setLocalNeeds(n);
-        setLocalInvest(clamp(remaining - n));
-      }
-      setLocalSavings(newVal);
-    } else {
-      const remaining = 100 - newVal;
-      const otherSum = localNeeds + localSavings;
-      if (otherSum > 0) {
-        const n = clamp(Math.round(localNeeds / otherSum * remaining));
-        setLocalNeeds(n);
-        setLocalSavings(clamp(remaining - n));
-      }
-      setLocalInvest(newVal);
-    }
+  // Push a field to the front of the lock queue (max 2 entries)
+  const pushLock = (field: 'needs' | 'savings' | 'invest') => {
+    setLockQueue(prev => {
+      const filtered = prev.filter(f => f !== field);
+      return [field, ...filtered].slice(0, 2) as typeof prev;
+    });
   };
+
+  /**
+   * Distributes the remaining % among sponge fields so the total is exactly 100.
+   * - 2 locked → 1 sponge absorbs the remainder.
+   * - 1 locked → 2 sponges share the remainder proportionally to their current values.
+   * - 0 locked → no adjustment (all three are free).
+   */
+  const getSpongeValue = (
+    locked: Array<'needs' | 'savings' | 'invest'>,
+    needs: number, savings: number, invest: number
+  ) => {
+    const all: Array<'needs' | 'savings' | 'invest'> = ['needs', 'savings', 'invest'];
+    const sponges = all.filter(f => !locked.includes(f));
+    const vals: Record<string, number> = { needs, savings, invest };
+    if (sponges.length === 0) return { needs, savings, invest };
+
+    const lockedSum = locked.reduce((s, f) => s + vals[f], 0);
+    const remaining = Math.max(0, 100 - lockedSum);
+
+    if (sponges.length === 1) {
+      // Single sponge takes whatever is left
+      vals[sponges[0]] = remaining;
+    } else {
+      // Two sponges — distribute proportionally to their current values
+      const spongeTotal = sponges.reduce((s, f) => s + vals[f], 0);
+      if (spongeTotal === 0) {
+        const half = Math.floor(remaining / 2);
+        vals[sponges[0]] = half;
+        vals[sponges[1]] = remaining - half;
+      } else {
+        const s0 = Math.round(vals[sponges[0]] / spongeTotal * remaining);
+        vals[sponges[0]] = Math.max(0, s0);
+        vals[sponges[1]] = Math.max(0, remaining - s0);
+      }
+    }
+    return { needs: vals.needs, savings: vals.savings, invest: vals.invest };
+  };
+
+  const handleSlider = (field: 'needs' | 'savings' | 'invest', newVal: number) => {
+    // Hard-clamp: cannot exceed what would push total over 100
+    const currentVals = { needs: localNeeds, savings: localSavings, invest: localInvest };
+    const otherSum = Object.entries(currentVals)
+      .filter(([k]) => k !== field)
+      .reduce((s, [, v]) => s + v, 0);
+    const clampedVal = Math.min(newVal, Math.max(0, 100 - otherSum));
+
+    // Compute the next lock queue synchronously before any state update
+    const nextQueue = lockQueue.includes(field)
+      ? lockQueue
+      : [field, ...lockQueue.filter(f => f !== field)].slice(0, 2) as typeof lockQueue;
+    setLockQueue(nextQueue);
+
+    const vals = { ...currentVals, [field]: clampedVal };
+    const computed = getSpongeValue(nextQueue, vals.needs, vals.savings, vals.invest);
+    setLocalNeeds(computed.needs);
+    setLocalSavings(computed.savings);
+    setLocalInvest(computed.invest);
+  };
+
+  // Vibration guard: fires once when someone types a value that makes total > 100
+  // (slider can't exceed 100 by design, so this only triggers for manual input)
+  useEffect(() => {
+    if (sum > 100 && !hasVibratedRef.current) {
+      hasVibratedRef.current = true;
+      if ('vibrate' in navigator) navigator.vibrate(80);
+    } else if (sum <= 100) {
+      hasVibratedRef.current = false;
+    }
+  }, [sum]);
 
   useEffect(() => {
     const err = sum !== 100;
@@ -181,10 +419,17 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
   };
 
   const commitEdit = () => {
+    if (!editingField) return;
     const val = Math.min(100, Math.max(0, parseInt(editingVal) || 0));
-    if (editingField === 'needs') setLocalNeeds(val);
-    else if (editingField === 'savings') setLocalSavings(val);
-    else if (editingField === 'invest') setLocalInvest(val);
+    // For typed values: push to lock queue then compute sponge (no hard clamp — red shows if total ≠ 100)
+    const nextQueue = [editingField, ...lockQueue.filter(f => f !== editingField)].slice(0, 2) as typeof lockQueue;
+    setLockQueue(nextQueue);
+    const current = { needs: localNeeds, savings: localSavings, invest: localInvest };
+    current[editingField] = val;
+    const computed = getSpongeValue(nextQueue, current.needs, current.savings, current.invest);
+    setLocalNeeds(computed.needs);
+    setLocalSavings(computed.savings);
+    setLocalInvest(computed.invest);
     setEditingField(null);
   };
 
@@ -196,17 +441,23 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
 
   return (
     <div className="space-y-5">
-      <p className="text-xs text-slate-400 leading-relaxed">Drag the slider or tap the % to type a value. The others auto-balance.</p>
+      <p className="text-xs text-slate-400 leading-relaxed">Drag the slider or tap the % to type. Dragging is capped at 100% total — the last field auto-adjusts.</p>
 
       {rows.map(row => (
         <div key={row.key}>
           <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-2">
-              <span className="text-base">{row.emoji}</span>
-              <span className="text-sm font-semibold text-slate-700">{row.label}</span>
+            {/* Left side: fixed layout — reserve space for 'auto' badge so nothing jumps */}
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="text-base flex-shrink-0">{row.emoji}</span>
+              <span className="text-sm font-semibold text-slate-700 flex-shrink-0">{row.label}</span>
+              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-opacity flex-shrink-0 ${
+                lockQueue.length === 2 && !lockQueue.includes(row.key)
+                  ? 'text-slate-400 bg-slate-100 opacity-100'
+                  : 'opacity-0 pointer-events-none select-none bg-slate-100 text-slate-400'
+              }`}>auto</span>
             </div>
             {editingField === row.key ? (
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1 flex-shrink-0">
                 <input
                   ref={editRef}
                   type="number"
@@ -216,20 +467,41 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
                   onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') setEditingField(null); }}
                   className={`w-14 text-right bg-slate-50 border ${hasError ? 'border-red-300' : 'border-orange-300'} rounded-lg px-2 py-1 text-sm font-black outline-none`}
                 />
-                <span className="text-sm font-bold text-slate-400">%</span>
+                <span className={`text-sm font-bold ${hasError ? 'text-red-400' : 'text-slate-400'}`}>%</span>
               </div>
             ) : (
-              <button onClick={() => startEdit(row.key, row.val)} className={`text-sm font-black px-2 py-0.5 rounded-lg ${hasError ? 'text-red-500 bg-red-50' : 'text-slate-700 hover:bg-orange-50 hover:text-orange-600'} transition-colors`}>
+              <button onClick={() => startEdit(row.key, row.val)} className={`text-sm font-black px-2 py-0.5 rounded-lg flex-shrink-0 ${hasError ? 'text-red-500 bg-red-50' : 'text-slate-700 hover:bg-orange-50 hover:text-orange-600'} transition-colors`}>
                 {row.val}%
               </button>
             )}
           </div>
-          <input
-            type="range" min={0} max={100} value={row.val}
-            onChange={e => handleSlider(row.key, parseInt(e.target.value))}
-            className={`w-full h-2.5 rounded-full appearance-none cursor-pointer ${row.accent}`}
-            style={{ background: `linear-gradient(to right, ${row.color} ${row.val}%, #f1f5f9 ${row.val}%)` }}
-          />
+
+          {/* Slider: max=100 always (prevents visual flicker); clamping is done in handleSlider */}
+          <div className="relative">
+            <input
+              type="range" min={0} max={100}
+              step={precisionField === row.key ? 1 : 5}
+              value={row.val}
+              onChange={e => handleSlider(row.key, parseInt(e.target.value))}
+              onPointerDown={() => {
+                holdTimerRef.current = setTimeout(() => setPrecisionField(row.key), 200);
+              }}
+              onPointerUp={() => {
+                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+                setPrecisionField(null);
+              }}
+              onPointerLeave={() => {
+                if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
+                setPrecisionField(null);
+              }}
+              className={`w-full h-2.5 rounded-full appearance-none cursor-pointer ${row.accent}`}
+              style={{ background: `linear-gradient(to right, ${row.color} ${row.val}%, #f1f5f9 ${row.val}%)` }}
+            />
+            {precisionField === row.key && (
+              <p className="text-[10px] text-slate-400 mt-0.5 text-right font-semibold">❤️‍🔥 Precision mode — any %
+              </p>
+            )}
+          </div>
         </div>
       ))}
 
@@ -664,7 +936,8 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
               <p className="text-xs text-slate-400 text-center py-2">No preset bills yet. Add recurring expenses like rent or utilities.</p>
             )}
             {(settings.fixedBills ?? []).map((bill, bi) => (
-              <div key={bill.id} className="flex items-center gap-3 bg-slate-50 rounded-xl p-3 border border-slate-100">
+              <div key={bill.id} className="flex items-center gap-2 bg-slate-50 rounded-xl p-3 border border-slate-100">
+                {/* Emoji picker */}
                 <input
                   type="text"
                   value={bill.emoji}
@@ -676,30 +949,35 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
                   className="w-10 h-10 text-center text-xl bg-white rounded-xl border border-slate-200 outline-none flex-shrink-0"
                   maxLength={2}
                 />
-                <input
-                  type="text"
-                  placeholder="Bill name (e.g. Rent)"
-                  value={bill.name}
-                  onChange={e => {
-                    const updated = [...(settings.fixedBills ?? [])];
-                    updated[bi] = { ...updated[bi], name: e.target.value };
-                    onUpdateSettings({ fixedBills: updated });
-                  }}
-                  className="flex-1 bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-orange-400"
-                />
-                <div className="relative w-28 flex-shrink-0">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-slate-400">{settings.currency}</span>
+                {/* Name + amount stacked vertically — eliminates overflow on any currency */}
+                <div className="flex-1 min-w-0 flex flex-col gap-1.5">
                   <input
-                    type="number"
-                    placeholder="0"
-                    value={bill.preset || ''}
+                    type="text"
+                    placeholder="Bill name (e.g. Rent)"
+                    value={bill.name}
                     onChange={e => {
                       const updated = [...(settings.fixedBills ?? [])];
-                      updated[bi] = { ...updated[bi], preset: parseFloat(e.target.value) || 0 };
+                      updated[bi] = { ...updated[bi], name: e.target.value };
                       onUpdateSettings({ fixedBills: updated });
                     }}
-                    className="w-full bg-white border border-slate-200 rounded-xl pl-10 pr-3 py-2 text-sm font-bold text-slate-800 outline-none focus:border-orange-400 text-right"
+                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-orange-400"
                   />
+                  <div className="flex items-center bg-white border border-slate-200 rounded-xl overflow-hidden focus-within:border-orange-400">
+                    <span className="pl-3 pr-2 text-xs font-bold text-slate-400 flex-shrink-0">{settings.currency}</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      placeholder="0"
+                      value={bill.preset ? bill.preset.toLocaleString('en-US') : ''}
+                      onChange={e => {
+                        const raw = parseFloat(e.target.value.replace(/,/g, '')) || 0;
+                        const updated = [...(settings.fixedBills ?? [])];
+                        updated[bi] = { ...updated[bi], preset: raw };
+                        onUpdateSettings({ fixedBills: updated });
+                      }}
+                      className="flex-1 min-w-0 bg-transparent px-2 py-2 text-sm font-bold text-slate-800 outline-none text-right"
+                    />
+                  </div>
                 </div>
                 <button
                   onClick={() => {
@@ -712,9 +990,24 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
               </div>
             ))}
             {(settings.fixedBills?.length ?? 0) > 0 && (
-              <div className="bg-orange-50 rounded-xl px-4 py-3 border border-orange-100">
-                <p className="text-xs font-bold text-orange-700">Total preset: {formatCurrency((settings.fixedBills ?? []).reduce((s, b) => s + b.preset, 0), settings.currency)}/mo</p>
-                <p className="text-[10px] text-orange-500 mt-0.5">This is deducted before your daily budget is calculated each month.</p>
+              <div className="space-y-2">
+                <div className="bg-orange-50 rounded-xl px-4 py-3 border border-orange-100">
+                  <p className="text-xs font-bold text-orange-700">Total preset: {formatCurrency((settings.fixedBills ?? []).reduce((s, b) => s + b.preset, 0), settings.currency)}/mo</p>
+                  <p className="text-[10px] text-orange-500 mt-0.5">This is deducted before your daily budget is calculated each month.</p>
+                </div>
+                {/* Save Template button */}
+                <button
+                  onClick={() => {
+                    const name = `Template ${new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`;
+                    const existing = JSON.parse(localStorage.getItem('taptrack_bill_templates') || '[]');
+                    existing.push({ name, bills: settings.fixedBills, savedAt: new Date().toISOString() });
+                    localStorage.setItem('taptrack_bill_templates', JSON.stringify(existing));
+                    alert(`Saved as "${name}"!`);
+                  }}
+                  className="w-full text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-xl py-2.5 hover:bg-emerald-100 transition-colors"
+                >
+                  💾 Save Bills as Template
+                </button>
               </div>
             )}
           </div>

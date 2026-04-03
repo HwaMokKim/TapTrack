@@ -49,6 +49,63 @@ function setLastCategory(cat: string) {
   localStorage.setItem('taptrack_last_category', cat);
 }
 
+/** Returns true for currencies that never use decimals and benefit from 00 key */
+function isHighDenominationCurrency(currency: string): boolean {
+  return currency === 'KRW' || currency === 'JPY';
+}
+
+/**
+ * Formats a raw number string into a Korean/Japanese human-readable unit label.
+ * e.g. 150000 (KRW) → "15만 원"    450000 (JPY) → "45万 円"
+ */
+function getUnitHelperText(rawStr: string, currency: string): string {
+  const num = parseInt(rawStr.replace(/,/g, ''), 10);
+  if (!num || num < 10000) return '';
+
+  if (currency === 'KRW') {
+    const man = Math.floor(num / 10000);
+    const remainder = num % 10000;
+    const cheon = Math.floor(remainder / 1000);
+    let label = `${man}만`;
+    if (cheon > 0) label += ` ${cheon}천`;
+    return `${label} 원`;
+  }
+  if (currency === 'JPY') {
+    const man = Math.floor(num / 10000);
+    const remainder = num % 10000;
+    const sen = Math.floor(remainder / 1000);
+    let label = `${man}万`;
+    if (sen > 0) label += ` ${sen}千`;
+    return `${label} 円`;
+  }
+  return '';
+}
+
+/** Quick-add chip definitions per currency group */
+function getQuickChips(currency: string): { label: string; value: number }[] {
+  if (currency === 'KRW') {
+    return [
+      { label: '+1만', value: 10000 },
+      { label: '+5만', value: 50000 },
+      { label: '+10만', value: 100000 },
+    ];
+  }
+  if (currency === 'JPY') {
+    return [
+      { label: '+1万', value: 10000 },
+      { label: '+5万', value: 50000 },
+      { label: '+10万', value: 100000 },
+    ];
+  }
+  // Low-denomination currencies
+  const sym = getCurrencySymbol(currency);
+  return [
+    { label: `+${sym}10`,  value: 10  },
+    { label: `+${sym}50`,  value: 50  },
+    { label: `+${sym}100`, value: 100 },
+  ];
+}
+
 export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave, currency }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [amountStr, setAmountStr] = useState('0');
@@ -64,6 +121,9 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
   const [incomeAllocation, setIncomeAllocation] = useState<'Spending' | 'Savings' | 'Investment'>('Spending');
   const searchRef = useRef<HTMLInputElement>(null);
 
+  const isHighDenom = isHighDenominationCurrency(currency);
+  const quickChips = getQuickChips(currency);
+
   // Reset overlay state each time it opens
   useEffect(() => {
     if (isOpen) {
@@ -77,7 +137,7 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
       setShowAddCat(false);
       setIsIncome(false);
       setIncomeAllocation('Spending');
-      setCategory(getLastCategory()); // Always resume with last-used category
+      setCategory(getLastCategory());
     }
   }, [isOpen]);
 
@@ -91,23 +151,48 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
     if (val === 'DEL') {
       setAmountStr(prev => (prev.length > 1 ? prev.slice(0, -1) : '0'));
     } else if (val === '.') {
-      if (!amountStr.includes('.')) setAmountStr(prev => prev + '.');
+      // Decimal only for non-high-denom currencies
+      if (!isHighDenom && !amountStr.includes('.')) {
+        setAmountStr(prev => prev + '.');
+      }
+    } else if (val === '00') {
+      // Double-zero shortcut
+      if (amountStr === '0') return;
+      setAmountStr(prev => prev + '00');
     } else {
-      // Limit to 2 decimal places
+      // Regular digit — limit decimals to 2 places
       if (amountStr.includes('.') && amountStr.split('.')[1].length >= 2) return;
       setAmountStr(prev => prev === '0' ? val : prev + val);
     }
   };
 
-  // Format amountStr with commas for display (keep raw for calculation)
+  /** Add a fixed chip amount to the current value */
+  const handleChipAdd = (chipValue: number) => {
+    const current = parseInt(amountStr.replace(/,/g, ''), 10) || 0;
+    setAmountStr(String(current + chipValue));
+  };
+
+  // Format amountStr with commas for display
   const displayAmount = (() => {
     if (amountStr.includes('.')) {
       const [whole, dec] = amountStr.split('.');
-      const wholeNum = parseInt(whole.replace(/,/g, '')) || 0;
+      const wholeNum = parseInt(whole.replace(/,/g, ''), 10) || 0;
       return `${wholeNum.toLocaleString('en-US')}.${dec}`;
     }
-    const num = parseInt(amountStr) || 0;
+    const num = parseInt(amountStr, 10) || 0;
     return num.toLocaleString('en-US');
+  })();
+
+  // KRW/JPY helper unit text shown below the amount
+  const unitHelperText = isHighDenom ? getUnitHelperText(amountStr, currency) : '';
+
+  // Dynamic font size thresholds — wider for high-denom currencies
+  const amountFontClass = (() => {
+    const len = displayAmount.length;
+    if (len > 12) return 'text-2xl';
+    if (len > 8)  return 'text-3xl';
+    if (len > 6)  return 'text-4xl';
+    return 'text-5xl';
   })();
 
   const handleSave = () => {
@@ -142,6 +227,9 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
   );
   const isFixed = FIXED_CATEGORIES.has(category);
   const effectiveAmount = splitBy > 1 ? parseFloat(amountStr) / splitBy : parseFloat(amountStr);
+
+  // Numpad keys — swap . for 00 on high-denomination currencies
+  const numpadKeys = [1, 2, 3, 4, 5, 6, 7, 8, 9, isHighDenom ? '00' : '.', 0, 'DEL'];
 
   return (
     <AnimatePresence>
@@ -182,68 +270,106 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
 
         {step === 1 && (
           <>
-            {/* ── Spacer pushes numpad to bottom ── */}
+            {/* ── Spacer ── */}
             <div className="flex-1" />
 
-            {/* ── Category + Amount Row ── */}
-            <div className="flex items-center justify-between px-5 pb-3 flex-shrink-0">
-              {!isIncome ? (
-                <button
-                  onClick={() => setShowCategoryPicker(true)}
-                  className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 transition-colors ${
-                    isFixed ? 'bg-violet-100' : 'bg-slate-100 hover:bg-slate-200'
-                  }`}
-                >
-                  <span className="text-xl">{currentCat.emoji}</span>
-                  <span className={`font-bold text-sm ${isFixed ? 'text-violet-700' : 'text-slate-800'}`}>
-                    {currentCat.label}
-                  </span>
-                  {isFixed && (
-                    <span className="text-[10px] font-bold text-violet-500 bg-violet-200 px-1.5 py-0.5 rounded-full">FIXED</span>
-                  )}
-                  <ChevronDown className={`w-4 h-4 ${isFixed ? 'text-violet-400' : 'text-slate-400'}`} />
-                </button>
-              ) : (
-                <div className="flex items-center gap-1.5">
-                  {(['Spending', 'Savings', 'Investment'] as const).map(bucket => (
-                    <button
-                      key={bucket}
-                      onClick={() => setIncomeAllocation(bucket)}
-                      className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${
-                        incomeAllocation === bucket
-                          ? 'bg-emerald-500 text-white shadow-sm scale-105'
-                          : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
-                      }`}
-                    >
-                      {bucket === 'Spending' ? '💳' : bucket === 'Savings' ? '🏦' : '📈'} {bucket}
-                    </button>
-                  ))}
-                </div>
-              )}
+            {/* ── Category + Amount Row (overflow-safe) ── */}
+            <div className="flex items-center justify-between px-5 pb-2 flex-shrink-0 gap-2">
+              {/* Left: category selector — truncates gracefully */}
+              <div className="min-w-0 flex-shrink">
+                {!isIncome ? (
+                  <button
+                    onClick={() => setShowCategoryPicker(true)}
+                    className={`flex items-center gap-2 rounded-2xl px-4 py-2.5 transition-colors max-w-full ${
+                      isFixed ? 'bg-violet-100' : 'bg-slate-100 hover:bg-slate-200'
+                    }`}
+                  >
+                    <span className="text-xl flex-shrink-0">{currentCat.emoji}</span>
+                    <span className={`font-bold text-sm truncate ${isFixed ? 'text-violet-700' : 'text-slate-800'}`}>
+                      {currentCat.label}
+                    </span>
+                    {isFixed && (
+                      <span className="text-[10px] font-bold text-violet-500 bg-violet-200 px-1.5 py-0.5 rounded-full flex-shrink-0">FIXED</span>
+                    )}
+                    <ChevronDown className={`w-4 h-4 flex-shrink-0 ${isFixed ? 'text-violet-400' : 'text-slate-400'}`} />
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    {(['Spending', 'Savings', 'Investment'] as const).map(bucket => (
+                      <button
+                        key={bucket}
+                        onClick={() => setIncomeAllocation(bucket)}
+                        className={`px-3 py-2 rounded-xl text-[11px] font-black transition-all ${
+                          incomeAllocation === bucket
+                            ? 'bg-emerald-500 text-white shadow-sm scale-105'
+                            : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                        }`}
+                      >
+                        {bucket === 'Spending' ? '💳' : bucket === 'Savings' ? '🏦' : '📈'} {bucket}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
 
-              <div className="flex items-baseline gap-1">
-                <span className={`text-lg font-semibold ${isIncome ? 'text-emerald-400' : 'text-slate-400'}`}>{getCurrencySymbol(currency)}</span>
-                <span className={`font-black tabular-nums tracking-tighter leading-none ${
-                  isIncome ? 'text-emerald-500' : 'text-slate-800'
-                } ${
-                  displayAmount.length > 10 ? 'text-3xl' : displayAmount.length > 7 ? 'text-4xl' : 'text-5xl'
-                }`}>
-                  {displayAmount}
-                </span>
+              {/* Right: amount display — never shrinks, always readable */}
+              <div className="flex-shrink-0 pl-2 text-right">
+                <div className="flex items-baseline gap-1 justify-end">
+                  <span className={`text-lg font-semibold ${isIncome ? 'text-emerald-400' : 'text-slate-400'}`}>
+                    {getCurrencySymbol(currency)}
+                  </span>
+                  <span className={`font-black tabular-nums tracking-tighter leading-none ${
+                    isIncome ? 'text-emerald-500' : 'text-slate-800'
+                  } ${amountFontClass}`}>
+                    {displayAmount}
+                  </span>
+                </div>
+                {/* KRW/JPY unit helper — softly formatted */}
+                <AnimatePresence>
+                  {unitHelperText && (
+                    <motion.p
+                      key={unitHelperText}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0 }}
+                      className="text-xs text-slate-400 font-semibold mt-0.5"
+                    >
+                      {unitHelperText}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
 
-            {/* ── Numpad — anchored near bottom ── */}
+            {/* ── Quick-Add Chips ── */}
+            <div className="px-4 pb-2 flex gap-2 flex-shrink-0">
+              {quickChips.map(chip => (
+                <motion.button
+                  key={chip.label}
+                  whileTap={{ scale: 0.92 }}
+                  onClick={() => handleChipAdd(chip.value)}
+                  className={`flex-1 py-2 rounded-xl text-sm font-black transition-colors ${
+                    isIncome
+                      ? 'bg-emerald-50 text-emerald-600 active:bg-emerald-100'
+                      : 'bg-orange-50 text-orange-600 active:bg-orange-100'
+                  }`}
+                >
+                  {chip.label}
+                </motion.button>
+              ))}
+            </div>
+
+            {/* ── Numpad ── */}
             <div className="px-4 flex-shrink-0">
               <div className="grid grid-cols-3 gap-2.5">
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, '.', 0, 'DEL'].map(btn => (
+                {numpadKeys.map((btn, idx) => (
                   <motion.button
-                    key={btn}
+                    key={`${btn}-${idx}`}
                     whileTap={{ scale: 0.9, backgroundColor: isIncome ? '#d1fae5' : '#e2e8f0' }}
                     onClick={() => handleNumpad(btn.toString())}
                     className={`h-14 text-2xl font-bold bg-slate-50 rounded-2xl transition-colors select-none flex items-center justify-center ${
                       isIncome ? 'text-emerald-700 active:bg-emerald-100' : 'text-slate-800 active:bg-slate-200'
-                    }`}
+                    } ${btn === '00' ? 'text-xl' : ''}`}
                   >
                     {btn === 'DEL' ? '⌫' : btn}
                   </motion.button>

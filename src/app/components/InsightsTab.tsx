@@ -144,32 +144,69 @@ function GoalProgressCard({ settings }: { settings: UserSettings }) {
         {hasGoals && goalAmount > 0 && (
           <div className="mb-3">
             {totalSaved >= goalAmount ? (
-              <div className="bg-gradient-to-r from-orange-400 to-pink-500 rounded-xl p-3 text-center text-white shadow-sm mt-1">
-                <p className="font-black text-lg">Goal Reached! 🎉</p>
-                <p className="text-xs font-semibold opacity-90 block mt-0.5">You successfully saved {formatCurrency(goalAmount, settings.currency)}</p>
+              // ── Goal Complete: golden ripple celebration ──
+              <div className="relative">
+                <motion.div
+                  className="bg-gradient-to-r from-amber-400 to-orange-500 rounded-xl p-3 text-center text-white shadow-sm mt-1"
+                  initial={{ scale: 0.96 }}
+                  animate={{ scale: [0.96, 1.02, 1] }}
+                  transition={{ duration: 0.6, ease: 'easeOut' }}
+                >
+                  <p className="font-black text-lg">Goal Reached! 🎉</p>
+                  <p className="text-xs font-semibold opacity-90 block mt-0.5">You successfully saved {formatCurrency(goalAmount, settings.currency)}</p>
+                </motion.div>
+                {/* Golden ripple burst from centre */}
+                <motion.div
+                  className="absolute inset-0 rounded-xl pointer-events-none"
+                  style={{ background: 'radial-gradient(circle, rgba(251,191,36,0.6) 0%, transparent 70%)' }}
+                  initial={{ scale: 0.4, opacity: 1 }}
+                  animate={{ scale: 2.8, opacity: 0 }}
+                  transition={{ duration: 1.1, ease: 'easeOut' }}
+                />
               </div>
             ) : (
-              <>
-                <div className="h-3 bg-slate-100 rounded-full overflow-hidden">
+              // ── In-progress: glowing animated bar ──
+              <div>
+                <div className="relative h-3 bg-slate-100 rounded-full overflow-visible">
+                  {/* Filled track */}
                   <motion.div
-                    className="h-full rounded-full bg-gradient-to-r from-orange-400 to-pink-400"
+                    className="absolute left-0 top-0 h-full rounded-full"
+                    style={{
+                      background: 'linear-gradient(90deg, #f97316, #ec4899)',
+                      boxShadow: `0 0 ${Math.round(progressPct / 10 + 4)}px ${Math.round(progressPct / 20 + 2)}px rgba(249,115,22,0.45)`,
+                    }}
                     initial={{ width: 0 }}
                     animate={{ width: `${progressPct}%` }}
                     transition={{ type: 'spring', damping: 22, stiffness: 80, delay: 0.2 }}
                   />
+                  {/* Illuminated cursor line at the leading edge */}
+                  {progressPct > 2 && (
+                    <motion.div
+                      className="absolute top-1/2 -translate-y-1/2 w-0.5 rounded-full pointer-events-none"
+                      style={{
+                        height: 20,
+                        background: 'white',
+                        boxShadow: '0 0 6px 3px rgba(255,255,255,0.9)',
+                        left: `calc(${progressPct}% - 1px)`,
+                      }}
+                      initial={{ opacity: 0 }}
+                      animate={{ opacity: [0.7, 1, 0.7] }}
+                      transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                  )}
                 </div>
                 <div className="flex justify-between mt-1.5">
                   <span className="text-[11px] text-slate-400">{progressPct.toFixed(0)}% there</span>
                   <span className="text-[11px] text-slate-400">{formatCurrency(Math.max(0, goalAmount - totalSaved), settings.currency)} to go</span>
                 </div>
-              </>
+              </div>
             )}
           </div>
         )}
 
-        {/* Weekly rollover highlight */}
+        {/* Weekly rollover highlight — only shown when there are no savings goals, to avoid doubling the amount */}
         <AnimatePresence>
-          {weeklyRollover > 0 && (
+          {weeklyRollover > 0 && !hasGoals && (
             <motion.div
               initial={{ opacity: 0, y: 4 }}
               animate={{ opacity: 1, y: 0 }}
@@ -177,9 +214,9 @@ function GoalProgressCard({ settings }: { settings: UserSettings }) {
             >
               <TrendingUp className="w-4 h-4 text-emerald-500 flex-shrink-0" />
               <div>
-                <p className="text-xs font-bold text-emerald-700">+{formatCurrency(weeklyRollover, settings.currency)} rolled in this week! 🐶</p>
+                <p className="text-xs font-bold text-emerald-700">+{formatCurrency(weeklyRollover, settings.currency)} saved this week! 🐶</p>
                 <p className="text-[10px] text-emerald-600">
-                  {hasGoals ? 'Daily savings stacked toward your goal' : 'You spent under budget — these are yours to keep!'}
+                  You spent under your budget — these are yours to keep!
                 </p>
               </div>
             </motion.div>
@@ -492,10 +529,42 @@ export const InsightsTab: React.FC<InsightsTabProps> = ({ transactions, settings
             </div>
           </>
         ) : (
-          <div className="text-center py-16">
-            <div className="text-5xl mb-4">📊</div>
-            <p className="font-semibold text-slate-700">No data for this month yet</p>
-            <p className="text-sm text-slate-400 mt-1">Log some expenses to see your breakdown</p>
+          // ── Skeleton empty state (glassmorphism) ──
+          <div
+            className="rounded-3xl border border-white/60 overflow-hidden"
+            style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.88) 0%, rgba(248,250,252,0.95) 100%)' }}
+          >
+            <div className="px-6 py-10 flex flex-col items-center gap-5">
+              {/* Floating icon */}
+              <motion.div
+                animate={{ y: [0, -6, 0] }}
+                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                className="text-5xl select-none"
+              >
+                📊
+              </motion.div>
+              <div className="text-center">
+                <p className="font-bold text-slate-700 text-sm mb-1">Nothing tracked yet.</p>
+                <p className="text-xs text-slate-400 leading-relaxed">
+                  Start logging to see your spending story unfold.
+                </p>
+              </div>
+              {/* Skeleton pie ring */}
+              <div className="w-32 h-32 rounded-full border-8 border-slate-200 animate-pulse opacity-40" />
+              {/* Skeleton category rows */}
+              <div className="w-full space-y-2">
+                {[80, 60, 45].map((w, i) => (
+                  <div key={i} className="flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-xl bg-slate-200 animate-pulse flex-shrink-0"
+                      style={{ animationDelay: `${i * 0.15}s` }} />
+                    <div className="flex-1 h-3 rounded-full bg-slate-200 animate-pulse"
+                      style={{ width: `${w}%`, animationDelay: `${i * 0.15}s` }} />
+                    <div className="w-10 h-3 rounded-full bg-slate-200 animate-pulse"
+                      style={{ animationDelay: `${i * 0.15}s` }} />
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         )}
       </div>

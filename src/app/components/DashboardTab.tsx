@@ -50,7 +50,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     if (isOverBudget) return "We'll roll it forward and adjust tomorrow's budget. You've got this! 🐾";
     if (safeToSpendNow < dailyLimit * 0.15) return "Almost at your daily limit — so close to a perfect day! 🦴";
     if (transactions.length === 0) return "Today's a blank canvas. Tap Quick Log and let's start! 🐶";
-    if (settings.weeklyRollover > 0) return `You've stashed an extra ${formatCurrency(settings.weeklyRollover, settings.currency)} in savings this week! 🏆`;
     // Show first savings goal if available
     const primaryGoal = settings.savingsGoals?.[0];
     return primaryGoal
@@ -112,7 +111,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               Safe to Spend Today
             </p>
 
-            {/* Big Number */}
+            {/* Big Number — clamp ranges widened for KRW/JPY multi-digit amounts */}
             <AnimatePresence mode="wait">
               <motion.p
                 key={safeToSpendNow.toFixed(0)}
@@ -123,13 +122,14 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
                 className={`font-black tabular-nums leading-none max-w-full overflow-hidden text-ellipsis whitespace-nowrap px-4 ${
                   isOverBudget ? 'text-slate-300' : 'text-slate-900'
                 }`}
-                style={{ 
-                  fontSize: formatCurrency(Math.abs(safeToSpendNow), settings.currency).length > 10 
-                    ? 'clamp(28px, 10vw, 56px)' 
-                    : formatCurrency(Math.abs(safeToSpendNow), settings.currency).length > 7
-                      ? 'clamp(32px, 12vw, 72px)'
-                      : 'clamp(40px, 15vw, 96px)' 
-                }}
+                style={(() => {
+                  const len = formatCurrency(Math.abs(safeToSpendNow), settings.currency).length;
+                  if (len > 14) return { fontSize: 'clamp(18px, 6vw, 36px)' };
+                  if (len > 12) return { fontSize: 'clamp(22px, 8vw, 44px)' };
+                  if (len > 9)  return { fontSize: 'clamp(28px, 10vw, 52px)' };
+                  if (len > 6)  return { fontSize: 'clamp(34px, 12vw, 72px)' };
+                  return { fontSize: 'clamp(40px, 15vw, 96px)' };
+                })()}
               >
                 {formatCurrency(Math.abs(safeToSpendNow), settings.currency)}
               </motion.p>
@@ -224,9 +224,34 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
           </div>
 
           {todaysLogs.length === 0 ? (
-            <div className="text-center py-8 text-slate-300 text-sm rounded-2xl border border-dashed border-slate-100">
-              <p className="text-2xl mb-1">📝</p>
-              Nothing logged yet today!
+            <div className="relative overflow-hidden rounded-2xl">
+              {/* Glassmorphism card */}
+              <div
+                className="rounded-2xl border border-white/60 bg-white/70 backdrop-blur-sm shadow-sm px-6 py-8 flex flex-col items-center text-center"
+                style={{ background: 'linear-gradient(135deg, rgba(255,255,255,0.85) 0%, rgba(248,250,252,0.9) 100%)' }}
+              >
+                {/* Animated floating icon */}
+                <motion.div
+                  animate={{ y: [0, -6, 0] }}
+                  transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+                  className="text-4xl mb-3 select-none"
+                >
+                  📋
+                </motion.div>
+                <p className="font-bold text-slate-700 text-sm mb-1">A fresh start.</p>
+                <p className="text-xs text-slate-400 leading-relaxed mb-5">
+                  Log your first expense to bring your budget to life.
+                </p>
+                {/* Pulsing CTA chip */}
+                <motion.button
+                  onClick={onQuickEntry}
+                  animate={{ scale: [1, 1.04, 1] }}
+                  transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
+                  className="flex items-center gap-1.5 bg-slate-900 text-white text-xs font-bold px-4 py-2.5 rounded-full shadow-lg"
+                >
+                  <Plus className="w-3.5 h-3.5" /> Quick Log
+                </motion.button>
+              </div>
             </div>
           ) : (
             <div className="space-y-2">

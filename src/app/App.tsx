@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+﻿import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SetupWizard } from './components/SetupWizard';
 import { DashboardTab } from './components/DashboardTab';
@@ -154,26 +154,7 @@ export default function App() {
       const saved = localStorage.getItem('taptrack_transactions');
       if (saved) return JSON.parse(saved);
     } catch {}
-    // Demo seed data
-    const now = new Date();
-    const d = (offset: number, h = 12, m = 0) => {
-      const date = new Date(now);
-      date.setDate(now.getDate() - offset);
-      date.setHours(h, m, 0, 0);
-      return date.toISOString();
-    };
-    return [
-      { id: '1', amount: 12.50, category: 'Food',      description: 'Lunch at hawker centre', date: d(0, 13), splitBy: 1 },
-      { id: '2', amount: 4.00,  category: 'Coffee',    description: 'Kopi from the kopitiam',  date: d(0, 9),  splitBy: 1 },
-      { id: '3', amount: 45.00, category: 'Transport', description: 'Grab to office',          date: d(1, 8),  splitBy: 2 },
-      { id: '4', amount: 28.00, category: 'Shopping',  description: 'New tee from UNIQLO',     date: d(2, 16), splitBy: 1 },
-      { id: '5', amount: 80.00, category: 'Utility',   description: 'Monthly electricity',     date: d(3, 10), splitBy: 1, isFixed: true },
-      { id: '6', amount: 15.00, category: 'Food',      description: 'Dinner with friends',     date: d(4, 19), splitBy: 3 },
-      { id: '7', amount: 9.90,  category: 'Coffee',    description: 'Iced latte + croissant',  date: d(5, 11), splitBy: 1 },
-      { id: '8', amount: 200,   category: 'Shopping',  description: 'Shoes sale haul',         date: d(35, 14), splitBy: 1 },
-      { id: '9', amount: 60,    category: 'Food',      description: 'Family dinner',           date: d(38, 19), splitBy: 1 },
-      { id: '10', amount: 120,  category: 'Utility',   description: 'Internet + phone bill',   date: d(40, 10), splitBy: 1, isFixed: true },
-    ];
+    return [];
   });
 
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
