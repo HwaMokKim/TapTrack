@@ -124,6 +124,17 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
   const isHighDenom = isHighDenominationCurrency(currency);
   const quickChips = getQuickChips(currency);
 
+  /**
+   * chipInsertPlace: after tapping a chip of value C, the next digit typed
+   * fills at place C/10 (e.g. chip=10000 → place=1000 → pressing 5 adds
+   * 5×1000=5000; next digit fills place=100, etc.).
+   * null = normal append mode.
+   */
+  const chipInsertPlace = useRef<number | null>(null);
+
+  const delTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [isHoldingDel, setIsHoldingDel] = useState(false);
+
   // Reset overlay state each time it opens
   useEffect(() => {
     if (isOpen) {
@@ -138,6 +149,7 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
       setIsIncome(false);
       setIncomeAllocation('Spending');
       setCategory(getLastCategory());
+      chipInsertPlace.current = null; // reset chip mode on close/reopen
     }
   }, [isOpen]);
 
@@ -149,27 +161,55 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
 
   const handleNumpad = (val: string) => {
     if (val === 'DEL') {
+      chipInsertPlace.current = null; // exit chip mode on backspace
       setAmountStr(prev => (prev.length > 1 ? prev.slice(0, -1) : '0'));
     } else if (val === '.') {
       // Decimal only for non-high-denom currencies
       if (!isHighDenom && !amountStr.includes('.')) {
+        chipInsertPlace.current = null;
         setAmountStr(prev => prev + '.');
       }
     } else if (val === '00') {
       // Double-zero shortcut
+      if (chipInsertPlace.current !== null) {
+        // In chip mode: skip 2 decimal places
+        const place = chipInsertPlace.current;
+        if (place >= 100) {
+          const current = parseInt(amountStr.replace(/,/g, ''), 10) || 0;
+          setAmountStr(String(current)); // value unchanged, just advance position
+          chipInsertPlace.current = place / 100 >= 1 ? place / 100 : null;
+        } else {
+          chipInsertPlace.current = null;
+        }
+        return;
+      }
       if (amountStr === '0') return;
       setAmountStr(prev => prev + '00');
     } else {
-      // Regular digit — limit decimals to 2 places
+      // Regular digit
+      if (chipInsertPlace.current !== null) {
+        // Chip precision mode: place digit at chipInsertPlace
+        const place = chipInsertPlace.current;
+        const digit = parseInt(val, 10);
+        const current = parseInt(amountStr.replace(/,/g, ''), 10) || 0;
+        setAmountStr(String(current + digit * place));
+        // Advance to next lower position
+        const nextPlace = place / 10;
+        chipInsertPlace.current = nextPlace >= 1 ? nextPlace : null;
+        return;
+      }
+      // Normal append mode
       if (amountStr.includes('.') && amountStr.split('.')[1].length >= 2) return;
       setAmountStr(prev => prev === '0' ? val : prev + val);
     }
   };
 
-  /** Add a fixed chip amount to the current value */
+  /** Add a chip amount and enter positional-digit entry mode */
   const handleChipAdd = (chipValue: number) => {
     const current = parseInt(amountStr.replace(/,/g, ''), 10) || 0;
     setAmountStr(String(current + chipValue));
+    // Next digit fills at chipValue/10 (e.g. chip=10000 → place=1000)
+    chipInsertPlace.current = chipValue / 10;
   };
 
   // Format amountStr with commas for display
@@ -366,9 +406,35 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
                   <motion.button
                     key={`${btn}-${idx}`}
                     whileTap={{ scale: 0.9, backgroundColor: isIncome ? '#d1fae5' : '#e2e8f0' }}
-                    onClick={() => handleNumpad(btn.toString())}
-                    className={`h-14 text-2xl font-bold bg-slate-50 rounded-2xl transition-colors select-none flex items-center justify-center ${
-                      isIncome ? 'text-emerald-700 active:bg-emerald-100' : 'text-slate-800 active:bg-slate-200'
+                    onClick={() => { if (btn !== 'DEL') handleNumpad(btn.toString()); }}
+                    onPointerDown={() => {
+                      if (btn === 'DEL') {
+                        setIsHoldingDel(true);
+                        delTimerRef.current = setTimeout(() => {
+                           setAmountStr('0');
+                           chipInsertPlace.current = null;
+                           if ('vibrate' in navigator) navigator.vibrate(50);
+                           setIsHoldingDel(false);
+                        }, 600);
+                      }
+                    }}
+                    onPointerUp={() => {
+                      if (btn === 'DEL') {
+                        if (delTimerRef.current) clearTimeout(delTimerRef.current);
+                        if (isHoldingDel) {
+                          handleNumpad('DEL');
+                        }
+                        setIsHoldingDel(false);
+                      }
+                    }}
+                    onPointerLeave={() => {
+                      if (btn === 'DEL') {
+                        if (delTimerRef.current) clearTimeout(delTimerRef.current);
+                        setIsHoldingDel(false);
+                      }
+                    }}
+                    className={`h-14 text-2xl font-bold rounded-2xl transition-colors select-none flex items-center justify-center ${
+                      btn === 'DEL' && isHoldingDel ? 'bg-red-100 text-red-600' : 'bg-slate-50 ' + (isIncome ? 'text-emerald-700 active:bg-emerald-100' : 'text-slate-800 active:bg-slate-200')
                     } ${btn === '00' ? 'text-xl' : ''}`}
                   >
                     {btn === 'DEL' ? '⌫' : btn}

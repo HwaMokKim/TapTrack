@@ -139,10 +139,15 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
   const [editingVal,   setEditingVal]   = useState('');
   const editRef = useRef<HTMLInputElement>(null);
 
-  // prevField = last slider the user touched — becomes the "locked" one next drag
-  const [prevField, setPrevField] = useState<'needs' | 'savings' | 'invest' | null>(null);
+  /**
+   * Rolling-lock: prevField stored in a ref so it is ALWAYS the live value
+   * inside drag event handlers (no stale-closure issue from useState).
+   * Initialised to 'invest' so invest is the default sponge on the very
+   * first drag — dragging needs or savings alone only moves invest.
+   */
+  const prevFieldRef = useRef<'needs' | 'savings' | 'invest'>('invest');
 
-  // Hold 200ms to enter precision mode (step 1% instead of 5%)
+  // Hold 1 s to enter precision mode (step 1% instead of 5%)
   const [precisionField, setPrecisionField] = useState<'needs' | 'savings' | 'invest' | null>(null);
   const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -154,49 +159,30 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
   const hasError = sum !== 100;
 
   /**
-   * Core rolling-lock update:
-   *   field  = slider being moved
-   *   rawVal = value the browser reported
-   *   locked = prevField if it differs from field, otherwise null
+   * Core rolling-lock update.
+   * locked = prevFieldRef.current when it differs from the field being dragged.
+   * sponge = the remaining 3rd field — auto-adjusts to keep total == 100.
    */
   const applyUpdate = (
     field: 'needs' | 'savings' | 'invest',
     rawVal: number,
-    locked: 'needs' | 'savings' | 'invest' | null,
+    locked: 'needs' | 'savings' | 'invest',
     cur: Record<string, number>
   ): Record<string, number> => {
-    const others = ALL.filter(f => f !== field);
-
-    if (locked !== null) {
-      // Hard-clamp so sponge never goes < 0
-      const maxVal = Math.max(0, 100 - cur[locked]);
-      const val = Math.min(rawVal, maxVal);
-      const sponge = others.find(f => f !== locked)!;
-      return { ...cur, [field]: val, [sponge]: Math.max(0, 100 - val - cur[locked]) };
-    }
-
-    // No lock yet (first drag): distribute remainder among the other two proportionally
-    const val = rawVal;
-    const remaining = Math.max(0, 100 - val);
-    const othersSum = others.reduce((s, f) => s + cur[f], 0);
-    const next: Record<string, number> = { ...cur, [field]: val };
-    if (othersSum === 0) {
-      next[others[0]] = Math.floor(remaining / 2);
-      next[others[1]] = remaining - next[others[0]];
-    } else {
-      const s0 = Math.round(cur[others[0]] / othersSum * remaining);
-      next[others[0]] = Math.max(0, s0);
-      next[others[1]] = Math.max(0, remaining - s0);
-    }
-    return next;
+    const sponge = ALL.find(f => f !== field && f !== locked)!;
+    // Hard-clamp: field cannot push sponge below 0
+    const maxVal = Math.max(0, 100 - cur[locked]);
+    const val = field === locked ? rawVal : Math.min(rawVal, maxVal);
+    return { ...cur, [field]: val, [sponge]: Math.max(0, 100 - val - cur[locked]) };
   };
 
   const handleSlider = (field: 'needs' | 'savings' | 'invest', rawVal: number) => {
-    const locked = prevField !== null && prevField !== field ? prevField : null;
+    // locked is always the PREVIOUSLY touched field (ref is synchronous — no stale state)
+    const locked = prevFieldRef.current !== field ? prevFieldRef.current : ALL.find(f => f !== field)!;
     const cur = { needs: localNeeds, savings: localSavings, invest: localInvest };
     const next = applyUpdate(field, rawVal, locked, cur);
     setLocalNeeds(next.needs); setLocalSavings(next.savings); setLocalInvest(next.invest);
-    setPrevField(field);
+    prevFieldRef.current = field; // update synchronously — visible on NEXT drag immediately
   };
 
   useEffect(() => {
@@ -220,11 +206,11 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
   const commitEdit = () => {
     if (!editingField) return;
     const val = Math.min(100, Math.max(0, parseInt(editingVal) || 0));
-    const locked = prevField !== null && prevField !== editingField ? prevField : null;
+    const locked = prevFieldRef.current !== editingField ? prevFieldRef.current : ALL.find(f => f !== editingField)!;
     const cur = { needs: localNeeds, savings: localSavings, invest: localInvest };
     const next = applyUpdate(editingField, val, locked, cur);
     setLocalNeeds(next.needs); setLocalSavings(next.savings); setLocalInvest(next.invest);
-    setPrevField(editingField); setEditingField(null);
+    prevFieldRef.current = editingField; setEditingField(null);
   };
 
   const rows: { key: 'needs' | 'savings' | 'invest'; label: string; emoji: string; val: number; color: string; accent: string }[] = [
@@ -233,9 +219,9 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
     { key: 'invest',  label: 'Investments', emoji: '📈', val: localInvest,  color: '#8b5cf6', accent: 'accent-violet-500' },
   ];
 
-  // sponge = the field that is neither prevField (locked) nor currently editing
+  // sponge = the field that is neither prevFieldRef (locked) nor the field being actively edited
   const isSponge = (key: 'needs' | 'savings' | 'invest') =>
-    prevField !== null && key !== prevField && key !== (editingField ?? prevField);
+    key !== prevFieldRef.current && key !== (editingField ?? prevFieldRef.current);
 
   return (
     <div className="space-y-5">
@@ -276,7 +262,7 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
               step={precisionField === row.key ? 1 : 5}
               value={row.val}
               onChange={e => handleSlider(row.key, parseInt(e.target.value))}
-              onPointerDown={() => { holdTimerRef.current = setTimeout(() => setPrecisionField(row.key), 200); }}
+              onPointerDown={() => { holdTimerRef.current = setTimeout(() => setPrecisionField(row.key), 1000); }}
               onPointerUp={() => { if (holdTimerRef.current) clearTimeout(holdTimerRef.current); setPrecisionField(null); }}
               onPointerLeave={() => { if (holdTimerRef.current) clearTimeout(holdTimerRef.current); setPrecisionField(null); }}
               className={`w-full h-2.5 rounded-full appearance-none cursor-pointer ${row.accent}`}
@@ -309,6 +295,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
   const [isEditingBudget, setIsEditingBudget] = useState(false);
   const [isBudgetInvalid, setIsBudgetInvalid] = useState(false);
   const [editingGoalId, setEditingGoalId] = useState<string | null>(null);
+  const [editingBillId, setEditingBillId] = useState<string | null>(null);
   
   // Prompt State
   const [transferPromptGoalId, setTransferPromptGoalId] = useState<string | null>(null);
@@ -703,11 +690,13 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
           <div className="px-5 pt-4 pb-3 border-b border-slate-50 flex items-center justify-between">
             <div>
               <h2 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Monthly Fixed Bills</h2>
-              <p className="text-[10px] text-slate-300 mt-0.5">Pre-set bills are deducted from Day 1 of each month</p>
+              <p className="text-[10px] text-slate-300 mt-0.5">Pre-set bills are deducted on Day 1 of each month</p>
             </div>
             <button
               onClick={() => {
-                const newBill: FixedBill = { id: Date.now().toString(), name: '', emoji: '💸', preset: 0 };
+                const newId = Date.now().toString();
+                setEditingBillId(newId);
+                const newBill: FixedBill = { id: newId, name: '', emoji: '💸', preset: 0 };
                 onUpdateSettings({ fixedBills: [...(settings.fixedBills ?? []), newBill] });
               }}
               className="text-xs font-bold text-orange-500 bg-orange-50 px-3 py-1 rounded-full"
@@ -715,83 +704,117 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
               + Add Bill
             </button>
           </div>
-          <div className="px-5 py-4 space-y-3">
+          <div className="px-5 py-4 space-y-4">
             {(settings.fixedBills?.length ?? 0) === 0 && (
-              <p className="text-xs text-slate-400 text-center py-2">No preset bills yet. Add recurring expenses like rent or utilities.</p>
+              <p className="text-xs text-slate-400 text-center py-2">
+                No preset bills yet. Add recurring expenses like rent or utilities.
+              </p>
             )}
-            {(settings.fixedBills ?? []).map((bill, bi) => (
-              <div key={bill.id} className="flex items-center gap-2 bg-slate-50 rounded-xl p-3 border border-slate-100">
-                {/* Emoji picker */}
-                <input
-                  type="text"
-                  value={bill.emoji}
-                  onChange={e => {
-                    const updated = [...(settings.fixedBills ?? [])];
-                    updated[bi] = { ...updated[bi], emoji: e.target.value };
-                    onUpdateSettings({ fixedBills: updated });
-                  }}
-                  className="w-10 h-10 text-center text-xl bg-white rounded-xl border border-slate-200 outline-none flex-shrink-0"
-                  maxLength={2}
-                />
-                {/* Name + amount stacked vertically — eliminates overflow on any currency */}
-                <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-                  <input
-                    type="text"
-                    placeholder="Bill name (e.g. Rent)"
-                    value={bill.name}
-                    onChange={e => {
-                      const updated = [...(settings.fixedBills ?? [])];
-                      updated[bi] = { ...updated[bi], name: e.target.value };
-                      onUpdateSettings({ fixedBills: updated });
-                    }}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-orange-400"
-                  />
-                  <div className="flex items-center bg-white border border-slate-200 rounded-xl overflow-hidden focus-within:border-orange-400">
-                    <span className="pl-3 pr-2 text-xs font-bold text-slate-400 flex-shrink-0">{settings.currency}</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      placeholder="0"
-                      value={bill.preset ? bill.preset.toLocaleString('en-US') : ''}
-                      onChange={e => {
-                        const raw = parseFloat(e.target.value.replace(/,/g, '')) || 0;
-                        const updated = [...(settings.fixedBills ?? [])];
-                        updated[bi] = { ...updated[bi], preset: raw };
-                        onUpdateSettings({ fixedBills: updated });
-                      }}
-                      className="flex-1 min-w-0 bg-transparent px-2 py-2 text-sm font-bold text-slate-800 outline-none text-right"
-                    />
+            {(settings.fixedBills ?? []).map((bill, bi) => {
+              const isEditing = editingBillId === bill.id;
+
+              if (!isEditing) {
+                return (
+                  <div key={bill.id} className="bg-white border rounded-2xl p-4 transition-all relative border-slate-100 shadow-sm">
+                    <div className="flex items-start justify-between">
+                      <div className="flex items-start gap-3">
+                        <div className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-orange-50 text-orange-500 text-xl">
+                          {bill.emoji}
+                        </div>
+                        <div className="flex-1 mt-0.5">
+                          <p className="font-bold text-slate-800 text-sm">{bill.name || 'Unnamed Bill'}</p>
+                          <p className="text-[11px] font-semibold text-slate-400 uppercase tracking-wide mt-1">
+                            {formatCurrency(bill.preset, settings.currency)} / mo
+                          </p>
+                        </div>
+                      </div>
+                      <button 
+                        onClick={() => setEditingBillId(bill.id)} 
+                        className="text-xs font-semibold text-slate-400 hover:text-orange-500 px-3 py-1.5 bg-slate-50 hover:bg-orange-50 rounded-lg transition-colors flex-shrink-0"
+                      >
+                        Edit
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={bill.id} className="border border-orange-200 bg-orange-50/30 rounded-2xl p-4 space-y-4 relative">
+                  <div className="flex justify-between items-center mb-1">
+                    <h3 className="text-xs font-bold text-orange-600 uppercase tracking-wider">Editing Bill</h3>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          onUpdateSettings({ fixedBills: (settings.fixedBills ?? []).filter((_, i) => i !== bi) });
+                          setEditingBillId(null);
+                        }}
+                        className="text-xs font-semibold text-slate-400 hover:text-red-500 bg-white px-2 py-1 rounded-lg border border-slate-100"
+                      >
+                        Remove
+                      </button>
+                      <button
+                        onClick={() => setEditingBillId(null)}
+                        className="text-xs font-bold text-white bg-orange-500 px-3 py-1 rounded-lg shadow-sm"
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 block mb-1.5">Bill Name</label>
+                    <div className="flex gap-2">
+                       <input
+                        type="text"
+                        value={bill.emoji}
+                        onChange={e => {
+                          const updated = [...(settings.fixedBills ?? [])];
+                          updated[bi] = { ...updated[bi], emoji: e.target.value };
+                          onUpdateSettings({ fixedBills: updated });
+                        }}
+                        className="w-12 text-center text-xl bg-white border border-slate-200 rounded-xl outline-none focus:border-orange-400"
+                        maxLength={2}
+                        placeholder="💸"
+                      />
+                      <input 
+                        type="text" 
+                        placeholder="e.g. Rent, Electricity..."
+                        value={bill.name}
+                        onChange={e => {
+                          const updated = [...(settings.fixedBills ?? [])];
+                          updated[bi] = { ...updated[bi], name: e.target.value };
+                          onUpdateSettings({ fixedBills: updated });
+                        }}
+                        className="flex-1 w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-semibold text-slate-800 outline-none focus:border-orange-400 transition-colors"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-slate-500 block mb-1.5">Monthly Amount</label>
+                    <div className="flex items-center bg-white border border-slate-200 rounded-xl overflow-hidden focus-within:border-orange-400 transition-colors">
+                      <span className="pl-3 pr-2 text-sm font-bold text-slate-400">{settings.currency}</span>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={bill.preset ? bill.preset.toLocaleString('en-US') : ''}
+                        onChange={e => {
+                          const raw = parseFloat(e.target.value.replace(/,/g, '')) || 0;
+                          const updated = [...(settings.fixedBills ?? [])];
+                          updated[bi] = { ...updated[bi], preset: raw };
+                          onUpdateSettings({ fixedBills: updated });
+                        }}
+                        className="flex-1 w-full bg-transparent px-2 py-2.5 text-sm font-bold text-slate-800 outline-none"
+                      />
+                    </div>
                   </div>
                 </div>
-                <button
-                  onClick={() => {
-                    onUpdateSettings({ fixedBills: (settings.fixedBills ?? []).filter((_, i) => i !== bi) });
-                  }}
-                  className="p-1.5 text-slate-300 hover:text-red-400 transition-colors flex-shrink-0"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
-            {(settings.fixedBills?.length ?? 0) > 0 && (
-              <div className="space-y-2">
-                <div className="bg-orange-50 rounded-xl px-4 py-3 border border-orange-100">
-                  <p className="text-xs font-bold text-orange-700">Total preset: {formatCurrency((settings.fixedBills ?? []).reduce((s, b) => s + b.preset, 0), settings.currency)}/mo</p>
-                  <p className="text-[10px] text-orange-500 mt-0.5">This is deducted before your daily budget is calculated each month.</p>
-                </div>
-                {/* Save Template button */}
-                <button
-                  onClick={() => {
-                    const name = `Template ${new Date().toLocaleDateString('en-US', { month: 'short', year: 'numeric' })}`;
-                    const existing = JSON.parse(localStorage.getItem('taptrack_bill_templates') || '[]');
-                    existing.push({ name, bills: settings.fixedBills, savedAt: new Date().toISOString() });
-                    localStorage.setItem('taptrack_bill_templates', JSON.stringify(existing));
-                    alert(`Saved as "${name}"!`);
-                  }}
-                  className="w-full text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-xl py-2.5 hover:bg-emerald-100 transition-colors"
-                >
-                  💾 Save Bills as Template
-                </button>
+              );
+            })}
+            {(settings.fixedBills?.length ?? 0) > 0 && !editingBillId && (
+              <div className="bg-orange-50 rounded-xl px-4 py-3 border border-orange-100">
+                <p className="text-xs font-bold text-orange-700">Total preset: {formatCurrency((settings.fixedBills ?? []).reduce((s, b) => s + b.preset, 0), settings.currency)}/mo</p>
+                <p className="text-[10px] text-orange-500 mt-0.5">This is deducted before your daily budget is calculated each month.</p>
               </div>
             )}
           </div>
