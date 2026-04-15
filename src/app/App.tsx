@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { SetupWizard } from './components/SetupWizard';
 import { DashboardTab } from './components/DashboardTab';
@@ -260,9 +260,25 @@ export default function App() {
     }
   }, [settings.isOnboarded]);
 
-  const handleSetupComplete = (newSettings: Partial<UserSettings>) => {
+  const handleSetupComplete = (newSettings: Partial<UserSettings>, initialBills: import('./types').FixedBill[]) => {
     const now = new Date().toISOString();
     setSettings(prev => ({ ...prev, ...newSettings, trackingStartDate: prev.trackingStartDate ?? now }));
+    // Immediately book each fixed bill as a transaction so the monthly pool reflects them from day 1
+    if (initialBills.length > 0) {
+      const billTxns: Transaction[] = initialBills
+        .filter(b => b.preset > 0)
+        .map(b => ({
+          id: Math.random().toString(36).substr(2, 9),
+          amount: b.preset,
+          category: 'Utility', // categorised as fixed so FIXED_CATEGORIES catches it
+          description: b.name,
+          date: now,
+          splitBy: 1,
+          isFixed: true,
+          isIncome: false,
+        }));
+      setTransactions(prev => [...billTxns, ...prev]);
+    }
     // Auto-open quick log after onboarding completes
     setTimeout(() => setIsQuickEntryOpen(true), 600);
   };
@@ -320,7 +336,7 @@ export default function App() {
     return (
       <div style={{ height: '100svh' }} className="w-full bg-slate-900 flex justify-center sm:py-8">
         <div className="w-full max-w-md bg-slate-50 sm:rounded-3xl sm:shadow-2xl overflow-hidden relative flex flex-col">
-          <SetupWizard onComplete={handleSetupComplete} />
+          <SetupWizard onComplete={(s, bills) => handleSetupComplete(s, bills)} />
         </div>
       </div>
     );
