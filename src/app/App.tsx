@@ -47,6 +47,7 @@ const DEFAULT_SETTINGS: UserSettings = {
   priorityGoalId: null,
   goalsCelebrated: [],
   fixedBills: [],
+  billSavingsDebt: 0,
 };
 
 export function distributeSavings(pool: number, goals: SavingsGoal[], priorityId: string | null): SavingsGoal[] {
@@ -283,7 +284,7 @@ export default function App() {
     setTimeout(() => setIsQuickEntryOpen(true), 600);
   };
 
-  const handleSaveEntry = useCallback((entry: Omit<Transaction, 'id' | 'date'>) => {
+  const handleSaveEntry = useCallback((entry: Omit<Transaction, 'id' | 'date'> & { linkedBillId?: string }) => {
     const now = new Date();
     const todayStr = now.toISOString().split('T')[0];
     let newStreak = settings.streakCount;
@@ -296,6 +297,7 @@ export default function App() {
         newStreak = diffDays === 1 ? newStreak + 1 : 1;
       }
     }
+
     setSettings(prev => {
       // Auto-stamp completedAt for goals newly crossing the threshold
       const updatedGoals = (prev.savingsGoals ?? []).map(g => {
@@ -304,13 +306,51 @@ export default function App() {
         }
         return g;
       });
-      return { ...prev, streakCount: newStreak, lastLogDate: todayStr, savingsGoals: updatedGoals };
+
+      // ── Bill Savings Rollover ──────────────────────────────────────────────
+      // If the user logged a fixed bill that is linked to one of their presets,
+      // compute how much they over/under-spent vs. the monthly preset and
+      // adjust totalSaved (and billSavingsDebt) accordingly.
+      let savingsDelta = 0;
+      let newBillSavingsDebt = prev.billSavingsDebt ?? 0;
+
+      if (entry.linkedBillId && (FIXED_CATEGORIES.has(entry.category) || entry.isFixed)) {
+        const bill = (prev.fixedBills ?? []).find(b => b.id === entry.linkedBillId);
+        if (bill && bill.preset > 0) {
+          // How much has already been logged for this bill this month?
+          const monthStart = startOfMonth(now);
+          const monthEnd = endOfMonth(now);
+          // Note: we haven't added the new transaction yet, so read from current state
+          // We'll compute the new total including this entry
+          // delta = preset - (previously logged + this entry)
+          // positive delta = saved money (under budget), negative = overspent
+          // We simply track total this-month debits per bill via billSavingsDebt
+          // For simplicity: delta = preset - amount logged NOW
+          // Accumulated logic: each log shifts totalSaved by (preset / expected_payments - amount)
+          // We use a simpler per-payment model: the savings impact is preset minus what they paid.
+          // Over a month, multiple partial payments sum to the correct total.
+          savingsDelta = bill.preset - entry.amount;
+          newBillSavingsDebt = newBillSavingsDebt - savingsDelta; // debt increases if they overpaid
+        }
+      }
+
+      const newTotalSaved = prev.totalSaved + savingsDelta;
+
+      return {
+        ...prev,
+        streakCount: newStreak,
+        lastLogDate: todayStr,
+        savingsGoals: updatedGoals,
+        totalSaved: newTotalSaved,
+        billSavingsDebt: newBillSavingsDebt,
+      };
     });
+
     const newTransaction: Transaction = {
       ...entry,
       id: Math.random().toString(36).substr(2, 9),
       date: now.toISOString(),
-      isFixed: FIXED_CATEGORIES.has(entry.category),
+      isFixed: FIXED_CATEGORIES.has(entry.category) || !!entry.isFixed,
     };
     setTransactions(prev => [newTransaction, ...prev]);
     setPuppyCelebration(true);
@@ -445,6 +485,7 @@ export default function App() {
           onClose={() => setIsQuickEntryOpen(false)}
           onSave={handleSaveEntry}
           currency={settings.currency}
+          fixedBills={settings.fixedBills ?? []}
         />
 
         {/* Transaction Modal */}

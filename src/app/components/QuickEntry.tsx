@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Check, ChevronDown, Search, Plus, Users, FileText } from 'lucide-react';
-import { Transaction, FIXED_CATEGORIES, getCurrencySymbol } from '../types';
+import { Transaction, FixedBill, FIXED_CATEGORIES, getCurrencySymbol, formatCurrency } from '../types';
 
 interface QuickEntryProps {
   isOpen: boolean;
   onClose: () => void;
-  onSave: (entry: Omit<Transaction, 'id' | 'date'>) => void;
+  onSave: (entry: Omit<Transaction, 'id' | 'date'> & { linkedBillId?: string }) => void;
   currency: string;
+  fixedBills?: FixedBill[];
 }
 
 interface Category {
@@ -106,7 +107,7 @@ function getQuickChips(currency: string): { label: string; value: number }[] {
   ];
 }
 
-export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave, currency }) => {
+export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave, currency, fixedBills = [] }) => {
   const [step, setStep] = useState<1 | 2>(1);
   const [amountStr, setAmountStr] = useState('0');
   const [categories, setCategories] = useState<Category[]>(loadCategories);
@@ -119,6 +120,8 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
   const [showAddCat, setShowAddCat] = useState(false);
   const [isIncome, setIsIncome] = useState(false);
   const [incomeAllocation, setIncomeAllocation] = useState<'Spending' | 'Savings' | 'Investment'>('Spending');
+  // Track which preset fixed bill this log is for (null = regular entry)
+  const [linkedBillId, setLinkedBillId] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   const isHighDenom = isHighDenominationCurrency(currency);
@@ -149,7 +152,8 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
       setIsIncome(false);
       setIncomeAllocation('Spending');
       setCategory(getLastCategory());
-      chipInsertPlace.current = null; // reset chip mode on close/reopen
+      setLinkedBillId(null);
+      chipInsertPlace.current = null;
     }
   }, [isOpen]);
 
@@ -240,7 +244,7 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
     if (amount <= 0) return;
     if (!isIncome) setLastCategory(category);
     const cat = isIncome ? `Income:${incomeAllocation}` : category;
-    onSave({ amount, category: cat, splitBy, description, isIncome });
+    onSave({ amount, category: cat, splitBy, description, isIncome, linkedBillId: linkedBillId ?? undefined });
     onClose();
   };
 
@@ -307,6 +311,63 @@ export const QuickEntry: React.FC<QuickEntryProps> = ({ isOpen, onClose, onSave,
 
           <div className="w-9" />
         </header>
+
+        {/* ── Fixed Bills Quick-Select (shown above category picker when bills exist) ── */}
+        {step === 1 && !isIncome && fixedBills.length > 0 && (
+          <div className="px-5 pt-3 pb-1 flex-shrink-0">
+            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Your Bills</p>
+            <div className="flex gap-2 flex-wrap">
+              {fixedBills.map(bill => {
+                const isLinked = linkedBillId === bill.id;
+                return (
+                  <motion.button
+                    key={bill.id}
+                    whileTap={{ scale: 0.95 }}
+                    onClick={() => {
+                      if (isLinked) {
+                        // Deselect
+                        setLinkedBillId(null);
+                        setCategory(getLastCategory());
+                      } else {
+                        setLinkedBillId(bill.id);
+                        // Set category to Utility (fixed) so it registers as a fixed bill
+                        setCategory('Utility');
+                        setDescription(bill.name);
+                      }
+                    }}
+                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-bold transition-all ${
+                      isLinked
+                        ? 'bg-violet-500 text-white shadow-md ring-2 ring-violet-300'
+                        : 'bg-violet-50 text-violet-700 border border-violet-100 hover:bg-violet-100'
+                    }`}
+                  >
+                    <span>{bill.emoji}</span>
+                    <span>{bill.name}</span>
+                    {isLinked && <span className="text-[9px] bg-white/20 px-1 py-0.5 rounded-full">LINKED ✓</span>}
+                  </motion.button>
+                );
+              })}
+            </div>
+            {/* Explainer text when a bill is linked */}
+            {linkedBillId && (() => {
+              const bill = fixedBills.find(b => b.id === linkedBillId);
+              if (!bill || !bill.preset) return null;
+              return (
+                <motion.div
+                  initial={{ opacity: 0, y: 4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-2 bg-violet-50 border border-violet-100 rounded-xl px-3 py-2"
+                >
+                  <p className="text-[11px] text-violet-700 leading-relaxed">
+                    💡 Your preset is <strong>{formatCurrency(bill.preset, currency)}</strong>.
+                    Pay less → the difference goes into savings 🏦.
+                    Pay more → the extra is covered from savings.
+                  </p>
+                </motion.div>
+              );
+            })()}
+          </div>
+        )}
 
         {step === 1 && (
           <>

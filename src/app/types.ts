@@ -53,6 +53,9 @@ export interface UserSettings {
   totalSaved: number;       // running total accumulated savings
   // Monthly Fixed Bills Preset
   fixedBills: FixedBill[]; // Monthly recurring bills pre-set by user
+  // Bill Savings Rollover: tracks net over/under-spend on fixed bills this month.
+  // Negative = spent less than preset (money goes into savings). Positive = overspent (money owed from savings).
+  billSavingsDebt: number;
   // Tracking Celebrations
   goalsCelebrated: string[]; // List of goal IDs that have triggered a one-time celebration
 }
@@ -60,14 +63,18 @@ export interface UserSettings {
 // Categories that should subtract from the monthly pool only, not the daily limit
 export const FIXED_CATEGORIES = new Set(['Rent', 'Utility', 'Insurance', 'Mortgage', 'Subscription']);
 
+// Currencies that never use fractional amounts (no cents)
+const ZERO_DECIMAL_CURRENCIES = new Set(['KRW', 'JPY', 'VND', 'IDR', 'CLP', 'HUF', 'TWD', 'BIF', 'GNF', 'ISK', 'KMF', 'MGA', 'PYG', 'RWF', 'UGX', 'XAF', 'XOF', 'XPF']);
+
 // Global formatting helpers
 export function formatCurrency(amount: number, currencyCode: string): string {
+  const isZeroDecimal = ZERO_DECIMAL_CURRENCIES.has(currencyCode.toUpperCase());
   return new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: currencyCode,
     minimumFractionDigits: 0,
-    maximumFractionDigits: 2
-  }).format(amount);
+    maximumFractionDigits: isZeroDecimal ? 0 : 2,
+  }).format(isZeroDecimal ? Math.round(amount) : amount);
 }
 
 /** Format a plain number with commas, e.g. 1234567 → "1,234,567" */

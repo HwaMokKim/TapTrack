@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Plus, Info, Utensils, Coffee, Zap, Car, Bus, Home, ShoppingBag, Flame, ChevronUp, ChevronDown } from 'lucide-react';
 import { Transaction, UserSettings, FIXED_CATEGORIES, formatCurrency, getCurrencySymbol } from '../types';
@@ -39,6 +39,16 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
   const isOverBudget = safeToSpendNow < 0;
   const gaugePercent = Math.max(0, Math.min(100, (safeToSpendNow / Math.max(1, dailyLimit)) * 100));
 
+  // --- Spotlight Overlay ---
+  // Show when there are no transactions and user hasn't dismissed it this session
+  const [tourDismissed, setTourDismissed] = useState(false);
+  const isTourActive = transactions.length === 0 && !tourDismissed;
+
+  // Auto-dismiss tour once the user logs their first entry
+  useEffect(() => {
+    if (transactions.length > 0) setTourDismissed(true);
+  }, [transactions.length]);
+
   // --- Streak / Tracking Days ---
   const trackingDays = settings.trackingStartDate
     ? Math.max(1, differenceInDays(new Date(), new Date(settings.trackingStartDate)) + 1)
@@ -66,12 +76,72 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     // Outer wrapper: full screen, flex col
     <div className="flex flex-col bg-white h-full overflow-hidden">
 
+      {/* ── Spotlight Overlay ── */}
+      <AnimatePresence>
+        {isTourActive && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.4 }}
+            onClick={() => setTourDismissed(true)}
+            className="fixed inset-0 z-40 bg-slate-900/75 backdrop-blur-[2px] flex flex-col items-center justify-end pb-24 pointer-events-auto"
+          >
+            {/* Text callout above the button */}
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.3 }}
+              onClick={e => e.stopPropagation()}
+              className="flex flex-col items-center gap-2 mb-5 pointer-events-none"
+            >
+              <div className="bg-white rounded-2xl px-6 py-4 shadow-2xl max-w-xs text-center">
+                <p className="text-base font-black text-slate-800 mb-1">Log your first expense! 👇</p>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  The faster you log, the better your budget stays on track.
+                </p>
+              </div>
+              {/* Animated bouncing arrow */}
+              <motion.div
+                animate={{ y: [0, 8, 0] }}
+                transition={{ duration: 1.2, repeat: Infinity, ease: 'easeInOut' }}
+                className="text-2xl select-none"
+              >
+                ↓
+              </motion.div>
+            </motion.div>
+
+            {/* Spotlit Quick Log button — sits above the overlay via z-index */}
+            <motion.button
+              onClick={e => { e.stopPropagation(); onQuickEntry(); }}
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: [0.95, 1.02, 1], opacity: 1 }}
+              transition={{ delay: 0.2, duration: 0.5, scale: { repeat: Infinity, repeatDelay: 2, duration: 0.9, ease: 'easeInOut' } }}
+              className="relative z-50 w-72 flex items-center justify-center gap-2 bg-slate-900 text-white font-bold text-base py-4 rounded-2xl shadow-2xl ring-4 ring-orange-400 ring-offset-4 ring-offset-transparent"
+            >
+              <Plus className="w-5 h-5" />
+              Quick Log
+            </motion.button>
+
+            {/* Skip hint */}
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ delay: 1.5 }}
+              className="text-white/40 text-xs mt-5 font-medium pointer-events-none"
+            >
+              Tap anywhere to dismiss
+            </motion.p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ── Sticky Header ── */}
       <header className="flex-shrink-0 px-5 pt-5 pb-2 flex justify-between items-center relative z-20">
         <div className="font-black text-lg tracking-tight text-slate-800">
           Tap<span className="text-orange-500">Track</span>
         </div>
-        {/* Streak / Tracking Days Pill */}
+        {/* Streak Pill */}
         <div className="flex items-center gap-2 relative">
           {streak > 0 && (
             <div className="flex items-center gap-1 bg-orange-50 border border-orange-100 px-2.5 py-1 rounded-full">
@@ -79,22 +149,6 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
               <span className="text-xs font-bold text-orange-500">{streak}d</span>
             </div>
           )}
-          
-          {/* Coach Mark 1: Streak */}
-          <AnimatePresence>
-            {transactions.length === 0 && (
-              <motion.div 
-                initial={{ opacity: 0, scale: 0.9, y: -10 }} 
-                animate={{ opacity: 1, scale: 1, y: [0, 5, 0] }} 
-                exit={{ opacity: 0, scale: 0.9 }}
-                transition={{ delay: 1, opacity: { duration: 0.4 }, y: { repeat: Infinity, duration: 2, ease: "easeInOut" } }}
-                className="absolute top-full mt-3 right-0 bg-blue-500 text-white text-xs font-bold px-3 py-2.5 rounded-xl shadow-lg w-40 text-center pointer-events-none"
-              >
-                <div className="absolute -top-1 right-6 w-3 h-3 bg-blue-500 rotate-45 rounded-sm" />
-                Build your streak by logging every day!
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
       </header>
 
@@ -153,26 +207,32 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
             <p className="text-[11px] text-slate-400 mt-2">
               {formatCurrency(spentToday, settings.currency)} of {formatCurrency(dailyLimit, settings.currency)} spent
             </p>
+
+            {/* ── Oopsie Card: shown when savings has gone negative from bill overages ── */}
+            {(settings.totalSaved ?? 0) < 0 && (
+              <motion.div
+                initial={{ opacity: 0, y: 8, scale: 0.97 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                transition={{ type: 'spring', damping: 20, stiffness: 200, delay: 0.2 }}
+                className="mt-4 w-full max-w-xs bg-amber-50 border border-amber-200 rounded-2xl px-4 py-3 text-left"
+              >
+                <div className="flex items-start gap-2.5">
+                  <span className="text-xl flex-shrink-0 mt-0.5">🐶</span>
+                  <div>
+                    <p className="text-xs font-bold text-amber-800 leading-snug">
+                      Oopsie! Seems like there are some extras from last month. No worries, a little extra saving this month will sort it out!
+                    </p>
+                    <p className="text-[10px] text-amber-600 font-semibold mt-1.5">
+                      Shortfall: {formatCurrency(Math.abs(settings.totalSaved), settings.currency)}
+                    </p>
+                  </div>
+                </div>
+              </motion.div>
+            )}
           </div>
 
           {/* ── BOTTOM STACK: Dog → Quick Log Button ── */}
           <div className="w-full flex flex-col items-center gap-3 pb-5 relative">
-            {/* Coach Mark 2: Quick Log */}
-            <AnimatePresence>
-              {transactions.length === 0 && (
-                <motion.div 
-                  initial={{ opacity: 0, scale: 0.9, y: 10 }} 
-                  animate={{ opacity: 1, scale: 1, y: [0, -5, 0] }} 
-                  exit={{ opacity: 0, scale: 0.9 }}
-                  transition={{ delay: 2, opacity: { duration: 0.4 }, y: { repeat: Infinity, duration: 2, ease: "easeInOut" } }}
-                  className="absolute -top-14 bg-blue-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow-lg pointer-events-none z-10"
-                >
-                  Tap here to log your first entry! 
-                  <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-3 h-3 bg-blue-500 rotate-45 rounded-sm" />
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             {/* Dog motivation */}
             <AnimatePresence mode="wait">
               <motion.div
@@ -200,6 +260,7 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
 
             {/* Big Quick Log Button */}
             <motion.button
+              id="quick-log-btn"
               onClick={onQuickEntry}
               whileTap={{ scale: 0.95 }}
               whileHover={{ scale: 1.02 }}
@@ -297,3 +358,4 @@ export const DashboardTab: React.FC<DashboardTabProps> = ({
     </div>
   );
 };
+

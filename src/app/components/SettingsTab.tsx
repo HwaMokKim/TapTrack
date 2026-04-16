@@ -127,10 +127,11 @@ function GoalDatePicker({ value, onChange }: {
  * Hard-clamp: active <= 100 - prevField.value so sponge never goes below 0.
  * First drag: no lock yet, both others adjust proportionally.
  */
-function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
+function BudgetInputs({ settings, onUpdateSettings, setHasError, income }: {
   settings: UserSettings;
   onUpdateSettings: (s: Partial<UserSettings>) => void;
   setHasError: (err: boolean) => void;
+  income?: number;
 }) {
   const [localNeeds,   setLocalNeeds]   = useState(Math.round(settings.needsRatio * 100));
   const [localSavings, setLocalSavings] = useState(Math.round(settings.savingsRatio * 100));
@@ -213,6 +214,7 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
     prevFieldRef.current = editingField; setEditingField(null);
   };
 
+  const effectiveIncome = income ?? settings.income;
   const rows: { key: 'needs' | 'savings' | 'invest'; label: string; emoji: string; val: number; color: string; accent: string }[] = [
     { key: 'needs',   label: 'Spending',    emoji: '💳', val: localNeeds,   color: '#f97316', accent: 'accent-orange-500' },
     { key: 'savings', label: 'Savings',     emoji: '🏦', val: localSavings, color: '#10b981', accent: 'accent-emerald-500' },
@@ -234,7 +236,14 @@ function BudgetInputs({ settings, onUpdateSettings, setHasError }: {
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2 min-w-0">
               <span className="text-base flex-shrink-0">{row.emoji}</span>
-              <span className="text-sm font-semibold text-slate-700 flex-shrink-0">{row.label}</span>
+              <div className="flex flex-col min-w-0">
+                <span className="text-sm font-semibold text-slate-700 leading-tight">{row.label}</span>
+                {effectiveIncome > 0 && (
+                  <span className="text-[10px] text-slate-400 font-medium leading-tight">
+                    ≈ {formatCurrency((row.val / 100) * effectiveIncome, settings.currency)}/mo
+                  </span>
+                )}
+              </div>
               {/* 'auto' badge always rendered; opacity-toggled to avoid layout shifts */}
               <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-400 flex-shrink-0 transition-opacity ${isSponge(row.key) ? 'opacity-100' : 'opacity-0 pointer-events-none select-none'}`}>auto</span>
             </div>
@@ -425,7 +434,7 @@ export const SettingsTab: React.FC<SettingsTabProps> = ({ settings, transactions
 
               {/* Budget Rules */}
               <div>
-                <BudgetInputs settings={settings} onUpdateSettings={onUpdateSettings} setHasError={setIsBudgetInvalid} />
+                <BudgetInputs settings={settings} onUpdateSettings={onUpdateSettings} setHasError={setIsBudgetInvalid} income={settings.income} />
               </div>
             </div>
           ) : (
